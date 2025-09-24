@@ -851,7 +851,7 @@ if not env.msvc:
 else:
     # MSVC started offering C standard support with Visual Studio 2019 16.8, which covers all
     # of our supported VS2019 & VS2022 versions; VS2017 will only pass the C++ standard.
-    env.Prepend(CXXFLAGS=["/std:c++17"])
+    env.Prepend(CXXFLAGS=["/std:c++20"])
     if cc_version_major < 16:
         print_warning("Visual Studio 2017 cannot specify a C-Standard.")
     else:
