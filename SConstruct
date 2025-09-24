@@ -918,7 +918,7 @@ else:
     # MSVC started offering C standard support with Visual Studio 2019 16.8, which covers all
     # of our supported Visual Studio versions.
     env.Prepend(CFLAGS=["/std:c17"])
-    env.Prepend(CXXFLAGS=["/std:c++17"])
+    env.Prepend(CXXFLAGS=["/std:c++20"])
     # MSVC is non-conforming with the C++ standard by default, so we enable more conformance.
     # Note that this is still not complete conformance, as certain Windows-related headers
     # don't compile under complete conformance.
