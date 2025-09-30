@@ -95,3 +95,28 @@ cd godot
 scons platform=windows
 ```
 
+
+
+### debug with vscode:
+launch.json
+```
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach (Inspector)",
+      "address": "127.0.0.1",
+      "port": 9229
+    }
+  ]
+}
+```
+
+#### how to setup a new Game Project -> [GodotJS Documentation](https://godotjs.github.io/documentation/getting-started/)
+
+
+Good luck!
+
+
