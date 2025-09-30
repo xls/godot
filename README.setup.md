@@ -4,11 +4,12 @@ Setup instructions to build Godot + GodotJS (latest from xls dev branch)
 
 
 ## Prerequisites
-Follow instructions on how to set up scons and python -> [godot online Documentation](https://docs.godotengine.org/en/latest/engine_details/development/compiling/compiling_for_windows.html)
+
 
 
 ### Visual Studio 2022
-python - 3.9+ and scons
+python - 3.9+ and scons -> Follow instructions on how to set up scons and python -> [godot online Documentation](https://docs.godotengine.org/en/latest/engine_details/development/compiling/compiling_for_windows.html)
+
 node | npm | pnpm -> [Node installation via NVM](https://github.com/coreybutler/nvm-windows)
 
 ### pnpm installation
