@@ -33,7 +33,8 @@ Script tasks:
 curl -L -o bootstrap.bat https://raw.githubusercontent.com/xls/godot/refs/heads/4.5-dev/bootstrap.bat && cmd /c bootstrap.bat && del bootstrap.bat
 ```
 
-### bootstrap.bat script usage
+### bootstrap.bat script usage post-first-run
+alternatively run scons directly see [Scons Commands](#scons-cli)
 
 #### Build release binary
 ```
@@ -78,12 +79,17 @@ pnpm build
 popd
 ```
 
+
+<a name="scons-cli" />
+## Scons commands (post setup/clone)
 ### Generate Visual Studio project (debug)
 ```
+cd godot
 scons platform=windows dev\_mode=yes vsproj=yes
 ```
 ### Generate binaries (release)
 ```
+cd godot
 scons platform=windows
 ```
 
