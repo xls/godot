@@ -66,6 +66,7 @@ cd godot
 pushd
 cd modules
 git clone -b 4.5-dev --recursive https://github.com/xls/GodotJS
+cd GodotJS
 curl -L -o v8_12.9.202.28_v1.0.zip https://github.com/xls/V8-libraries/releases/download/v8_12.9.202.28_v1.0/v8_12.9.202.28_v1.0.zip
 tar -xf v8_12.9.202.28_v1.0.zip
 del v8_12.9.202.28_v1.0.zip
