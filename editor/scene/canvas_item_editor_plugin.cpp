@@ -2754,7 +2754,7 @@ void CanvasItemEditor::_gui_input_viewport(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> mb = p_event;
 	bool release_lmb = (mb.is_valid() && !mb->is_pressed() && mb->get_button_index() == MouseButton::LEFT); // Required to properly release some stuff (e.g. selection box) while panning.
 
-	if (EDITOR_GET("editors/panning/simple_panning") || !pan_pressed || release_lmb) {
+	if (simple_panning || !pan_pressed || release_lmb) {
 		accepted = true;
 		if (_gui_input_rulers_and_guides(p_event)) {
 			// print_line("Rulers and guides");
@@ -4143,7 +4143,8 @@ void CanvasItemEditor::_update_editor_settings() {
 
 	context_toolbar_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("ContextualToolbar"), EditorStringName(EditorStyles)));
 
-	panner->setup((ViewPanner::ControlScheme)EDITOR_GET("editors/panning/2d_editor_panning_scheme").operator int(), ED_GET_SHORTCUT("canvas_item_editor/pan_view"), bool(EDITOR_GET("editors/panning/simple_panning")));
+	simple_panning = EDITOR_GET("editors/panning/simple_panning");
+	panner->setup((ViewPanner::ControlScheme)EDITOR_GET("editors/panning/2d_editor_panning_scheme").operator int(), ED_GET_SHORTCUT("canvas_item_editor/pan_view"), simple_panning);
 	panner->set_scroll_speed(EDITOR_GET("editors/panning/2d_editor_pan_speed"));
 	panner->setup_warped_panning(get_viewport(), EDITOR_GET("editors/panning/warped_mouse_panning"));
 	panner->set_zoom_style((ViewPanner::ZoomStyle)EDITOR_GET("editors/panning/zoom_style").operator int());
@@ -4204,17 +4205,18 @@ void CanvasItemEditor::_notification(int p_what) {
 
 				Control *control = Object::cast_to<Control>(ci);
 				if (control) {
-					real_t anchors[4];
-					Vector2 pivot;
+					Vector2 pivot = control->get_pivot_offset();
+					Vector2 pivot_ratio = control->get_pivot_offset_ratio();
 
-					pivot = control->get_pivot_offset();
+					real_t anchors[4];
 					anchors[SIDE_LEFT] = control->get_anchor(SIDE_LEFT);
 					anchors[SIDE_RIGHT] = control->get_anchor(SIDE_RIGHT);
 					anchors[SIDE_TOP] = control->get_anchor(SIDE_TOP);
 					anchors[SIDE_BOTTOM] = control->get_anchor(SIDE_BOTTOM);
 
-					if (pivot != se->prev_pivot || anchors[SIDE_LEFT] != se->prev_anchors[SIDE_LEFT] || anchors[SIDE_RIGHT] != se->prev_anchors[SIDE_RIGHT] || anchors[SIDE_TOP] != se->prev_anchors[SIDE_TOP] || anchors[SIDE_BOTTOM] != se->prev_anchors[SIDE_BOTTOM]) {
+					if (pivot != se->prev_pivot || pivot_ratio != se->prev_pivot_ratio || anchors[SIDE_LEFT] != se->prev_anchors[SIDE_LEFT] || anchors[SIDE_RIGHT] != se->prev_anchors[SIDE_RIGHT] || anchors[SIDE_TOP] != se->prev_anchors[SIDE_TOP] || anchors[SIDE_BOTTOM] != se->prev_anchors[SIDE_BOTTOM]) {
 						se->prev_pivot = pivot;
+						se->prev_pivot_ratio = pivot_ratio;
 						se->prev_anchors[SIDE_LEFT] = anchors[SIDE_LEFT];
 						se->prev_anchors[SIDE_RIGHT] = anchors[SIDE_RIGHT];
 						se->prev_anchors[SIDE_TOP] = anchors[SIDE_TOP];

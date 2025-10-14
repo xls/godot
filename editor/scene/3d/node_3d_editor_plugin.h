@@ -37,6 +37,7 @@
 #include "scene/gui/box_container.h"
 #include "scene/gui/button.h"
 #include "scene/gui/spin_box.h"
+#include "scene/resources/gradient.h"
 #include "scene/resources/immediate_mesh.h"
 
 class AcceptDialog;
@@ -296,6 +297,7 @@ private:
 	void _update_name();
 	void _compute_edit(const Point2 &p_point);
 	void _clear_selected();
+	bool _is_rotation_arc_visible() const;
 	void _select_clicked(bool p_allow_locked);
 	ObjectID _select_ray(const Point2 &p_pos) const;
 	void _find_items_at_pos(const Point2 &p_pos, Vector<_RayResult> &r_results, bool p_include_locked);
@@ -390,6 +392,13 @@ private:
 		double numeric_input = 0.0;
 		bool numeric_negate = false;
 		int numeric_next_decimal = 0;
+
+		Vector3 rotation_axis;
+		double accumulated_rotation_angle = 0.0;
+		double display_rotation_angle = 0.0;
+		Vector3 initial_click_vector;
+		Vector3 previous_rotation_vector;
+		bool gizmo_initiated = false;
 	} _edit;
 
 	struct Cursor {
