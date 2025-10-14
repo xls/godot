@@ -88,12 +88,19 @@ popd
 ### Generate Visual Studio project (debug)
 ```
 cd godot
-scons platform=windows dev\_mode=yes vsproj=yes
+scons platform=windows dev_build=yes vsproj=yes
 ```
+
 ### Generate binaries (release)
 ```
 cd godot
 scons platform=windows
+```
+
+### Generate binaries (production)
+```
+cd godot
+scons platform=windows production=yes
 ```
 
 
