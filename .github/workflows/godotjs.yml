@@ -2,9 +2,10 @@ name: Build (Windows)
 
 on:
   push:
-    branches: [ "**" ]
+    branches: [ "4.5-dev" ]
     tags:     [ "v*", "*" ]
   pull_request:
+    branches: [ "4.5-dev" ]
   # Also handle a release that’s created from the UI
   release:
     types: [published]
