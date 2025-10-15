@@ -1,0 +1,118 @@
+name: Build (Windows)
+
+on:
+  push:
+    branches: [ "**" ]
+    tags:     [ "v*", "*" ]
+  pull_request:
+  # Also handle a release that’s created from the UI
+  release:
+    types: [published]
+
+permissions:
+  contents: write    # required to create/update releases and upload assets
+  actions: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    env:
+      REPO_NAME: ${{ github.event.repository.name }}
+      # For tag builds, this will be the tag (e.g. v1.2.3). For non-tags it’s the branch name.
+      REF_NAME: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Set up MSVC/VS build environment (finds latest installed VS on the runner)
+      - name: Set up MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: 'pip'
+
+      - name: Install SCons
+        run: python -m pip install --upgrade pip scons
+
+      - name: Setup Node (includes npm)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'pnpm'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+          run_install: false
+
+      # If you have JS deps, uncomment:
+      # - name: Install JS deps
+      #   run: pnpm install --frozen-lockfile
+
+      - name: Run bootstrap.bat
+        shell: cmd
+        run: |
+          call bootstrap.bat
+
+      - name: Build with SCons
+        shell: cmd
+        run: |
+          scons platform=windows
+
+      - name: Determine zip name
+        id: name_zip
+        shell: pwsh
+        run: |
+          $isTag = '${{ startsWith(github.ref, 'refs/tags/') }}' -eq 'true'
+          if ($isTag) {
+            $zip = "${{ env.REPO_NAME }}-${{ env.REF_NAME }}.zip"
+          } else {
+            # non-tag builds still get a stable artifact name
+            $zip = "${{ env.REPO_NAME }}-windows-${{ github.run_number }}.zip"
+          }
+          "zip_name=$zip" | Out-File -FilePath $Env:GITHUB_OUTPUT -Append
+
+      - name: Create ZIP from bin
+        shell: pwsh
+        run: |
+          $zip = "${{ steps.name_zip.outputs.zip_name }}"
+          $items = @()
+          $items += Get-ChildItem -Path "bin" -Include *.exe,*.pdb,*.lib -File -Recurse
+          if (-not $items -or $items.Count -eq 0) {
+            Write-Error "No build outputs found in .\bin (expected *.exe, *.pdb, *.lib)."
+          }
+          # Ensure output directory exists
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $zipPath = Join-Path dist $zip
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path $items.FullName -DestinationPath $zipPath
+          "ZIP_PATH=$zipPath" | Out-File -FilePath $Env:GITHUB_OUTPUT -Append
+        id: zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name_zip.outputs.zip_name }}
+          path: ${{ steps.zip.outputs.ZIP_PATH }}
+          if-no-files-found: error
+          retention-days: 14
+
+      # If the run is for a tag (push tags or a published release), attach the zip to the release
+      - name: Upload to GitHub Release (tag builds)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.zip.outputs.ZIP_PATH }}
+          fail_on_unmatched_files: true
+          # If the release doesn't exist (push-tag path), this will create it
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
