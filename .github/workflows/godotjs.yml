@@ -48,11 +48,13 @@ jobs:
           node-version: 'lts/*'
           cache: 'pnpm'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          version: latest
-          run_install: false
+          node-version: 'lts/*'
+      
+      - name: Install pnpm
+        run: npm install -g pnpm
 
       # If you have JS deps, uncomment:
       # - name: Install JS deps
