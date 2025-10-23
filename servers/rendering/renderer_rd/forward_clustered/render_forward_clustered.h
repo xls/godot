@@ -102,8 +102,11 @@ public:
 		ClusterBuilderRD *cluster_builder = nullptr;
 
 		struct SSEffectsData {
-			Projection last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
-			Transform3D last_frame_transform;
+			Projection ssil_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
+			Transform3D ssil_last_frame_transform;
+
+			Projection ssr_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
+			Transform3D ssr_last_frame_transform;
 
 			RendererRD::SSEffects::SSILRenderBuffers ssil;
 			RendererRD::SSEffects::SSAORenderBuffers ssao;
@@ -498,17 +501,23 @@ private:
 				uint64_t sort_key2;
 			};
 			struct {
-				uint64_t geometry_id : 32;
-				uint64_t material_id : 32;
-
-				uint64_t shader_id : 32;
+				// Needs to be grouped together to be used in RenderElementInfo, as the value is masked directly.
 				uint64_t lod_index : 8;
 				uint64_t uses_softshadow : 1;
 				uint64_t uses_projector : 1;
 				uint64_t uses_forward_gi : 1;
 				uint64_t uses_lightmap : 1;
+
+				// Sorted based on optimal order for respecting priority and reducing the amount of rebinding of shaders, materials,
+				// and geometry. This current order was found to be the most optimal in large projects. If you wish to measure
+				// differences, refer to RenderingDeviceGraph and the methods available to print statistics for draw lists.
 				uint64_t depth_layer : 4;
 				uint64_t surface_index : 8;
+				uint64_t geometry_id : 32;
+				uint64_t material_id_hi : 8;
+
+				uint64_t material_id_lo : 24;
+				uint64_t shader_id : 32;
 				uint64_t priority : 8;
 			};
 		} sort;
@@ -752,9 +761,9 @@ private:
 	/* Render Scene */
 	void _process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections);
 	void _process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform);
-	void _copy_framebuffer_to_ssil(Ref<RenderSceneBuffersRD> p_render_buffers);
-	void _pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_gi, const RID *p_normal_roughness_slices, RID p_voxel_gi_buffer);
-	void _process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_dest_framebuffer, const RID *p_normal_buffer_slices, RID p_specular_buffer, const RID *p_metallic_slices, RID p_environment, const Projection *p_projections, const Vector3 *p_eye_offsets, bool p_use_additive);
+	void _process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform);
+	void _copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr);
+	void _pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_ssr, bool p_use_gi, const RID *p_normal_roughness_slices, RID p_voxel_gi_buffer);
 	void _process_sss(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection &p_camera);
 
 	/* Debug */
@@ -768,6 +777,7 @@ protected:
 
 	virtual void environment_set_ssao_quality(RS::EnvironmentSSAOQuality p_quality, bool p_half_size, float p_adaptive_target, int p_blur_passes, float p_fadeout_from, float p_fadeout_to) override;
 	virtual void environment_set_ssil_quality(RS::EnvironmentSSILQuality p_quality, bool p_half_size, float p_adaptive_target, int p_blur_passes, float p_fadeout_from, float p_fadeout_to) override;
+	virtual void environment_set_ssr_half_size(bool p_half_size) override;
 	virtual void environment_set_ssr_roughness_quality(RS::EnvironmentSSRRoughnessQuality p_quality) override;
 
 	virtual void sub_surface_scattering_set_quality(RS::SubSurfaceScatteringQuality p_quality) override;
