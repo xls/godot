@@ -2,10 +2,10 @@ name: Build (Windows)
 
 on:
   push:
-    branches: [ "4.6-dev" ]
+    branches: [ "master-dev" ]
     tags:     [ "v*", "*" ]
   pull_request:
-    branches: [ "4.6-dev" ]
+    branches: [ "master-dev" ]
   # Also handle a release that’s created from the UI
   release:
     types: [published]
@@ -46,7 +46,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
-      
+
       - name: Install pnpm
         run: npm install -g pnpm
 
