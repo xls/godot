@@ -43,6 +43,7 @@
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
 #include "editor/editor_undo_redo_manager.h"
+#include "editor/file_system/dependency_editor.h"
 #include "editor/gui/create_dialog.h"
 #include "editor/gui/directory_create_dialog.h"
 #include "editor/gui/editor_dir_dialog.h"
@@ -236,8 +237,8 @@ void FileSystemDock::_create_tree(TreeItem *p_parent, EditorFileSystemDirectory 
 	Ref<DirAccess> da = DirAccess::create(DirAccess::ACCESS_RESOURCES);
 
 	if (has_custom_color) {
-		subdirectory_item->set_icon_modulate(0, editor_is_dark_theme ? custom_color : custom_color * ITEM_COLOR_SCALE);
-		subdirectory_item->set_custom_bg_color(0, Color(custom_color, editor_is_dark_theme ? ITEM_ALPHA_MIN : ITEM_ALPHA_MAX));
+		subdirectory_item->set_icon_modulate(0, editor_is_dark_icon_and_font ? custom_color : custom_color * ITEM_COLOR_SCALE);
+		subdirectory_item->set_custom_bg_color(0, Color(custom_color, editor_is_dark_icon_and_font ? ITEM_ALPHA_MIN : ITEM_ALPHA_MAX));
 	} else {
 		TreeItem *parent = subdirectory_item->get_parent();
 		if (parent) {
@@ -494,6 +495,7 @@ void FileSystemDock::_update_display_mode(bool p_force) {
 				} else {
 					toolbar2_hbc->show();
 				}
+				button_file_list_display_mode->hide();
 
 				_update_tree(get_uncollapsed_paths());
 				file_list_vb->hide();
@@ -513,6 +515,7 @@ void FileSystemDock::_update_display_mode(bool p_force) {
 				tree->set_v_size_flags(SIZE_EXPAND_FILL);
 				tree->ensure_cursor_is_visible();
 				toolbar2_hbc->hide();
+				button_file_list_display_mode->show();
 				_update_tree(get_uncollapsed_paths());
 
 				file_list_vb->show();
@@ -630,9 +633,9 @@ void FileSystemDock::_notification(int p_what) {
 			// Update editor dark theme & always show folders states from editor settings, redraw if needed.
 			bool do_redraw = false;
 
-			bool new_editor_is_dark_theme = EditorThemeManager::is_dark_theme();
-			if (new_editor_is_dark_theme != editor_is_dark_theme) {
-				editor_is_dark_theme = new_editor_is_dark_theme;
+			bool new_editor_is_dark_icon_and_font = EditorThemeManager::is_dark_icon_and_font();
+			if (new_editor_is_dark_icon_and_font != editor_is_dark_icon_and_font) {
+				editor_is_dark_icon_and_font = new_editor_is_dark_icon_and_font;
 				do_redraw = true;
 			}
 
@@ -1080,7 +1083,7 @@ void FileSystemDock::_update_file_list(bool p_keep_selection) {
 
 					files->set_item_metadata(-1, bd);
 					files->set_item_selectable(-1, false);
-					if (!editor_is_dark_theme && inherited_folder_color != default_folder_color) {
+					if (!editor_is_dark_icon_and_font && inherited_folder_color != default_folder_color) {
 						files->set_item_icon_modulate(-1, inherited_folder_color * ITEM_COLOR_SCALE);
 					} else {
 						files->set_item_icon_modulate(-1, inherited_folder_color);
@@ -1098,7 +1101,7 @@ void FileSystemDock::_update_file_list(bool p_keep_selection) {
 					files->add_item(dname, folder_icon, true);
 					files->set_item_metadata(-1, dpath);
 					Color this_folder_color = has_custom_color ? folder_colors[assigned_folder_colors[dpath]] : inherited_folder_color;
-					if (!editor_is_dark_theme && this_folder_color != default_folder_color) {
+					if (!editor_is_dark_icon_and_font && this_folder_color != default_folder_color) {
 						this_folder_color *= ITEM_COLOR_SCALE;
 					}
 					files->set_item_icon_modulate(-1, this_folder_color);
@@ -1875,6 +1878,10 @@ void FileSystemDock::_duplicate_operation_confirm(const String &p_path) {
 		}
 	}
 	_try_duplicate_item(to_duplicate, p_path);
+}
+
+void FileSystemDock::_move_confirm() {
+	_move_operation_confirm(confirm_move_to_dir, confirm_to_copy);
 }
 
 void FileSystemDock::_overwrite_dialog_action(bool p_overwrite) {
@@ -3129,11 +3136,19 @@ void FileSystemDock::drop_data_fw(const Point2 &p_point, const Variant &p_data, 
 				}
 			}
 			if (!to_move.is_empty()) {
+				String move_confirm_text;
+				confirm_move_to_dir = to_dir;
+
 				if (Input::get_singleton()->is_key_pressed(Key::CMD_OR_CTRL)) {
-					_move_operation_confirm(to_dir, true);
+					move_confirm_text = vformat(TTR("Copy %d selected item(s) to \"%s\"?"), to_move.size(), target_dir);
+					confirm_to_copy = true;
 				} else {
-					_move_operation_confirm(to_dir);
+					move_confirm_text = vformat(TTR("Move %d selected item(s) to \"%s\"?"), to_move.size(), target_dir);
+					confirm_to_copy = false;
 				}
+
+				move_confirm_dialog->set_text(move_confirm_text);
+				move_confirm_dialog->popup_centered();
 			}
 		} else if (favorite) {
 			// Add the files from favorites.
@@ -3393,7 +3408,7 @@ void FileSystemDock::_file_and_folders_fill_popup(PopupMenu *p_popup, const Vect
 			for (const KeyValue<String, Color> &E : folder_colors) {
 				folder_colors_menu->add_icon_item(get_editor_theme_icon(SNAME("Folder")), E.key.capitalize());
 
-				folder_colors_menu->set_item_icon_modulate(-1, editor_is_dark_theme ? E.value : E.value * 2);
+				folder_colors_menu->set_item_icon_modulate(-1, editor_is_dark_icon_and_font ? E.value : E.value * 2);
 				folder_colors_menu->set_item_metadata(-1, E.key);
 			}
 		}
@@ -3609,6 +3624,7 @@ void FileSystemDock::_tree_empty_selected() {
 	if (file_list_vb->is_visible()) {
 		_update_file_list(false);
 	}
+	_update_selection_changed();
 }
 
 void FileSystemDock::_file_list_item_clicked(int p_item, const Vector2 &p_pos, MouseButton p_mouse_button_index) {
@@ -3699,6 +3715,16 @@ void FileSystemDock::_file_multi_selected(int p_index, bool p_selected) {
 	// Update the import dock.
 	import_dock_needs_update = true;
 	callable_mp(this, &FileSystemDock::_update_import_dock).call_deferred();
+}
+
+void FileSystemDock::_update_selection_changed() {
+	Vector<String> selection;
+	selection.append_array(_tree_get_selected());
+	selection.append_array(_file_list_get_selected());
+	if (prev_selection != selection) {
+		prev_selection = selection;
+		emit_signal(SNAME("selection_changed"));
+	}
 }
 
 void FileSystemDock::_tree_mouse_exited() {
@@ -3907,6 +3933,8 @@ void FileSystemDock::_update_import_dock() {
 	if (!import_dock_needs_update) {
 		return;
 	}
+
+	_update_selection_changed();
 
 	// List selected.
 	Vector<String> selected;
@@ -4165,6 +4193,7 @@ void FileSystemDock::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("files_moved", PropertyInfo(Variant::STRING, "old_file"), PropertyInfo(Variant::STRING, "new_file")));
 	ADD_SIGNAL(MethodInfo("folder_moved", PropertyInfo(Variant::STRING, "old_folder"), PropertyInfo(Variant::STRING, "new_folder")));
 	ADD_SIGNAL(MethodInfo("folder_color_changed"));
+	ADD_SIGNAL(MethodInfo("selection_changed"));
 
 	ADD_SIGNAL(MethodInfo("display_mode_changed"));
 }
@@ -4212,7 +4241,7 @@ FileSystemDock::FileSystemDock() {
 
 	assigned_folder_colors = ProjectSettings::get_singleton()->get_setting("file_customization/folder_colors");
 
-	editor_is_dark_theme = EditorThemeManager::is_dark_theme();
+	editor_is_dark_icon_and_font = EditorThemeManager::is_dark_icon_and_font();
 
 	VBoxContainer *main_vb = memnew(VBoxContainer);
 	add_child(main_vb);
@@ -4425,6 +4454,10 @@ FileSystemDock::FileSystemDock() {
 	add_child(conversion_dialog);
 	conversion_dialog->set_ok_button_text(TTRC("Convert"));
 	conversion_dialog->connect(SceneStringName(confirmed), callable_mp(this, &FileSystemDock::_convert_dialog_action));
+
+	move_confirm_dialog = memnew(ConfirmationDialog);
+	add_child(move_confirm_dialog);
+	move_confirm_dialog->connect(SceneStringName(confirmed), callable_mp(this, &FileSystemDock::_move_confirm));
 
 	uncollapsed_paths_before_search = Vector<String>();
 

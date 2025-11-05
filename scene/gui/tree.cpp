@@ -895,7 +895,7 @@ TreeItem *TreeItem::create_child(int p_index) {
 	} else {
 		int idx = 0;
 		if (!children_cache.is_empty()) {
-			idx = MIN(children_cache.size() - 1, p_index);
+			idx = MIN(int(children_cache.size()) - 1, p_index);
 			item_next = children_cache[idx];
 			item_prev = item_next->prev;
 		}
@@ -920,7 +920,7 @@ TreeItem *TreeItem::create_child(int p_index) {
 			if (ti->next) {
 				children_cache.insert(p_index, ti);
 			} else {
-				children_cache.append(ti);
+				children_cache.push_back(ti);
 			}
 		}
 	} else {
@@ -957,7 +957,7 @@ void TreeItem::add_child(TreeItem *p_item) {
 	last_child = p_item;
 
 	if (!children_cache.is_empty()) {
-		children_cache.append(p_item);
+		children_cache.push_back(p_item);
 	}
 
 	validate_cache();
@@ -1111,15 +1111,15 @@ TreeItem *TreeItem::get_child(int p_index) {
 	if (p_index < 0) {
 		p_index += children_cache.size();
 	}
-	ERR_FAIL_INDEX_V(p_index, children_cache.size(), nullptr);
+	ERR_FAIL_INDEX_V(p_index, (int)children_cache.size(), nullptr);
 
-	return children_cache.get(p_index);
+	return children_cache[p_index];
 }
 
 int TreeItem::get_visible_child_count() {
 	_create_children_cache();
 	int visible_count = 0;
-	for (int i = 0; i < children_cache.size(); i++) {
+	for (uint32_t i = 0; i < children_cache.size(); i++) {
 		if (children_cache[i]->is_visible()) {
 			visible_count += 1;
 		}
@@ -1175,7 +1175,7 @@ void TreeItem::validate_cache() const {
 		return;
 	}
 	TreeItem *scan = parent->first_child;
-	int index = 0;
+	uint32_t index = 0;
 	while (scan) {
 		DEV_ASSERT(parent->children_cache[index] == scan);
 		++index;
@@ -1265,7 +1265,7 @@ void TreeItem::move_after(TreeItem *p_item) {
 		// If the cache is empty, it has not been built but there
 		// are items in the tree (note p_item != nullptr,) so we cannot update it.
 		if (!parent->children_cache.is_empty()) {
-			parent->children_cache.append(this);
+			parent->children_cache.push_back(this);
 		}
 	}
 
@@ -3285,9 +3285,6 @@ int Tree::propagate_mouse_event(const Point2i &p_pos, int x_ofs, int y_ofs, int 
 		click_handled = true;
 		popup_pressing_edited_item = p_item;
 		popup_pressing_edited_item_column = col;
-
-		pressing_item_rect = Rect2(get_global_position() + Point2i(col_ofs, _get_title_button_height() + y_ofs) - theme_cache.offset, Size2(col_width, item_h));
-		pressing_for_editor_text = editor_text;
 		pressing_for_editor = true;
 
 		return -1; // Select.
@@ -3361,14 +3358,15 @@ void Tree::_text_editor_gui_input(const Ref<InputEvent> &p_event) {
 	if (p_event->is_action_pressed("ui_text_newline_blank", true)) {
 		accept_event();
 	} else if (p_event->is_action_pressed("ui_text_newline")) {
+		bool hide_focus = !text_editor->has_focus(true);
 		popup_edit_committed = true; // End edit popup processing.
 		popup_editor->hide();
-		_apply_multiline_edit();
+		_apply_multiline_edit(hide_focus);
 		accept_event();
 	}
 }
 
-void Tree::_apply_multiline_edit() {
+void Tree::_apply_multiline_edit(bool p_hide_focus) {
 	if (!popup_edited_item) {
 		return;
 	}
@@ -3387,6 +3385,7 @@ void Tree::_apply_multiline_edit() {
 		}
 	}
 
+	grab_focus(p_hide_focus);
 	item_edited(popup_edited_item_col, popup_edited_item);
 	queue_redraw();
 }
@@ -3399,6 +3398,8 @@ void Tree::_line_editor_submit(String p_text) {
 	if (popup_editor->get_hide_reason() == Popup::HIDE_REASON_CANCELED) {
 		return; // ESC pressed, app focus lost, or forced close from code.
 	}
+
+	bool hide_focus = !line_editor->has_focus(true);
 
 	popup_edit_committed = true; // End edit popup processing.
 	popup_editor->hide();
@@ -3432,6 +3433,7 @@ void Tree::_line_editor_submit(String p_text) {
 		}
 	}
 
+	grab_focus(hide_focus);
 	item_edited(popup_edited_item_col, popup_edited_item);
 	queue_redraw();
 }
@@ -4404,6 +4406,8 @@ bool Tree::edit_selected(bool p_force_edit) {
 		}
 		popup_rect.position += get_screen_position();
 
+		bool hide_focus = !has_focus(true);
+
 		line_editor->clear();
 		line_editor->set_text(c.mode == TreeItem::CELL_MODE_STRING ? c.text : String::num(c.val, Math::range_step_decimals(c.step)));
 		line_editor->select_all();
@@ -4420,10 +4424,12 @@ bool Tree::edit_selected(bool p_force_edit) {
 		popup_editor->popup();
 		popup_editor->child_controls_changed();
 
-		line_editor->grab_focus();
+		line_editor->grab_focus(hide_focus);
 
 		return true;
 	} else if (c.mode == TreeItem::CELL_MODE_STRING && c.edit_multiline) {
+		bool hide_focus = !has_focus(true);
+
 		line_editor->hide();
 
 		text_editor->clear();
@@ -4440,7 +4446,7 @@ bool Tree::edit_selected(bool p_force_edit) {
 		popup_editor->popup();
 		popup_editor->child_controls_changed();
 
-		text_editor->grab_focus();
+		text_editor->grab_focus(hide_focus);
 
 		return true;
 	}
