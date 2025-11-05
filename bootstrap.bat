@@ -42,7 +42,7 @@ if not defined GROOT (
   if exist "godot" (
     echo [INFO] godot repo already present, skipping clone.
   ) else (
-    git clone -b 4.6-dev --recursive https://github.com/xls/godot || (set "ERRSTEP=git clone godot" & goto :fatal)
+    git clone -b master-dev --recursive https://github.com/xls/godot || (set "ERRSTEP=git clone godot" & goto :fatal)
   )
   set "GROOT=%CD%\godot\"
 )
@@ -55,7 +55,7 @@ pushd "%GROOT%modules" || (set "ERRSTEP=cd modules" & goto :fatal)
 if exist "GodotJS" (
   echo [INFO] GodotJS repo already present, skipping clone.
 ) else (
-  git clone -b 4.5-dev --recursive https://github.com/xls/GodotJS || (set "ERRSTEP=git clone GodotJS" & goto :fatal)
+  git clone -b main-dev --recursive https://github.com/xls/GodotJS || (set "ERRSTEP=git clone GodotJS" & goto :fatal)
 )
 
 pushd "GodotJS" || (set "ERRSTEP=cd GodotJS" & goto :fatal)

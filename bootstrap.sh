@@ -20,7 +20,7 @@ main() {
 
     local GROOT=""
     local SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
+
     if [[ -f "$SCRIPT_DIR/SConstruct" ]]; then
         GROOT="$SCRIPT_DIR/"
     elif [[ -f "SConstruct" && -d "modules" ]]; then
@@ -33,7 +33,7 @@ main() {
         if [[ -d "godot" ]]; then
             echo "[INFO] godot repo already present, skipping clone."
         else
-            git clone -b 4.6-dev --recursive https://github.com/xls/godot || {
+            git clone -b master-dev --recursive https://github.com/xls/godot || {
                 echo "[ABORT] git clone godot" >&2
                 exit 1
             }
@@ -60,7 +60,7 @@ main() {
     if [[ -d "GodotJS" ]]; then
         echo "[INFO] GodotJS repo already present, skipping clone."
     else
-        git clone -b 4.5-dev --recursive https://github.com/xls/GodotJS || {
+        git clone -b main-devv --recursive https://github.com/xls/GodotJS || {
             echo "[ABORT] git clone GodotJS" >&2
             exit 1
         }
@@ -114,7 +114,7 @@ main() {
     if [[ -d "$GROOT/modules/GodotJS/node_modules/.bin" ]]; then
         export PATH="$GROOT/modules/GodotJS/node_modules/.bin:$PATH"
     fi
-    
+
     if command -v pnpm &> /dev/null; then
         echo "[INFO] pnpm on PATH for SCons:"
         command -v pnpm
@@ -126,7 +126,7 @@ main() {
 do_cli() {
     echo "[INFO] Building Godot (default CLI)..."
     pushd "$GROOT"
-    
+
     # Detect platform and build accordingly
     case "$(uname)" in
         Darwin*)
@@ -154,7 +154,7 @@ do_cli() {
             }
             ;;
     esac
-    
+
     echo "[DONE] Godot executables are in ./bin"
     if [[ -d "bin" ]]; then
         pushd "bin"
@@ -163,7 +163,7 @@ do_cli() {
     else
         echo "[WARN] ./bin directory not found. Staying in $(pwd)."
     fi
-    
+
     popd
 }
 
