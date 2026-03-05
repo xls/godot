@@ -84,6 +84,9 @@ if exist "package.json" (
 popd
 popd
 
+echo [INFO] Installing D3D12 SDK...
+python "%GROOT%misc\scripts\install_d3d12_sdk_windows.py" || (set "ERRSTEP=install_d3d12_sdk_windows.py" & goto :fatal)
+
 set "PATHEXT=.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
 set "PATH=%GROOT%modules\GodotJS\node_modules\.bin;%ProgramFiles%\nodejs;%AppData%\pnpm;%PATH%"
 where pnpm >NUL 2>&1 && echo [INFO] pnpm on PATH for SCons: & where pnpm

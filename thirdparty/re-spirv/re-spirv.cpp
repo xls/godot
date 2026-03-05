@@ -2312,6 +2312,8 @@ namespace respv {
         Options options;
 
         OptimizerContext() = delete;
+        OptimizerContext(const Shader &shader, std::vector<uint32_t> &instructionAdjacentListIndices, std::vector<uint32_t> &instructionInDegrees, std::vector<uint32_t> &instructionOutDegrees, std::vector<ListNode> &listNodes, std::vector<Resolution> &resolutions, std::vector<uint8_t> &optimizedData, Options options)
+            : shader(shader), instructionAdjacentListIndices(instructionAdjacentListIndices), instructionInDegrees(instructionInDegrees), instructionOutDegrees(instructionOutDegrees), listNodes(listNodes), resolutions(resolutions), optimizedData(optimizedData), options(options) {}
     };
 
     static void optimizerEliminateInstruction(uint32_t pInstructionIndex, OptimizerContext &rContext) {
