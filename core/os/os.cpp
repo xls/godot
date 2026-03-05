@@ -35,6 +35,7 @@
 #include "core/io/file_access.h"
 #include "core/io/json.h"
 #include "core/os/midi_driver.h"
+#include "core/os/os.h"
 #include "core/version_generated.gen.h"
 
 #include <cstdarg>
@@ -53,6 +54,16 @@ uint64_t OS::target_ticks = 0;
 
 OS *OS::get_singleton() {
 	return singleton;
+}
+
+bool OS::prefer_meta_over_ctrl() {
+#if defined(MACOS_ENABLED) || defined(APPLE_EMBEDDED_ENABLED)
+	return true;
+#elif defined(WEB_ENABLED)
+	return singleton->has_feature("web_macos") || singleton->has_feature("web_ios");
+#else
+	return false;
+#endif
 }
 
 uint64_t OS::get_ticks_msec() const {
@@ -398,6 +409,10 @@ Error OS::set_cwd(const String &p_cwd) {
 	return ERR_CANT_OPEN;
 }
 
+String OS::get_cwd() const {
+	return ".";
+}
+
 Dictionary OS::get_memory_info() const {
 	Dictionary meminfo;
 
@@ -640,7 +655,7 @@ bool OS::is_restart_on_exit_set() const {
 }
 
 List<String> OS::get_restart_on_exit_arguments() const {
-	return restart_commandline;
+	return List<String>(restart_commandline);
 }
 
 PackedStringArray OS::get_connected_midi_inputs() {

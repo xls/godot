@@ -24,6 +24,8 @@ def try_cmd(test, prefix, arch, check_clang=False):
     archs = ["x86_64", "x86_32", "arm64", "arm32"]
     if arch:
         archs = [arch]
+    if os.name == "nt":
+        archs += [""]
 
     for a in archs:
         try:
@@ -233,6 +235,7 @@ def get_flags():
 
     return {
         "arch": arch,
+        "d3d12": True,
         "supported": ["d3d12", "dcomp", "library", "mono", "xaudio2"],
     }
 
@@ -372,7 +375,7 @@ def configure_msvc(env: "SConsEnvironment"):
     if env["use_asan"]:
         env.extra_suffix += ".san"
         prebuilt_lib_extra_suffix = ".san"
-        env.AppendUnique(CPPDEFINES=["SANITIZERS_ENABLED"])
+        env.Append(CPPDEFINES=["ASAN_ENABLED"])
         env.Append(CCFLAGS=["/fsanitize=address"])
         env.Append(LINKFLAGS=["/INFERASANLIBS"])
 
@@ -404,6 +407,7 @@ def configure_msvc(env: "SConsEnvironment"):
         "dwrite",
         "wbemuuid",
         "ntdll",
+        "hid",
     ]
 
     if env.debug_features:
@@ -523,7 +527,8 @@ def get_ar_version(env):
     }
     try:
         output = (
-            subprocess.check_output([env.subst(env["AR"]), "--version"], shell=(os.name == "nt"))
+            subprocess
+            .check_output([env.subst(env["AR"]), "--version"], shell=(os.name == "nt"))
             .strip()
             .decode("utf-8")
         )
@@ -726,11 +731,12 @@ def configure_mingw(env: "SConsEnvironment"):
             sys.exit(255)
 
         env.extra_suffix += ".san"
-        env.AppendUnique(CPPDEFINES=["SANITIZERS_ENABLED"])
         san_flags = []
         if env["use_asan"]:
+            env.Append(CPPDEFINES=["ASAN_ENABLED"])
             san_flags.append("-fsanitize=address")
         if env["use_ubsan"]:
+            env.Append(CPPDEFINES=["UBSAN_ENABLED"])
             san_flags.append("-fsanitize=undefined")
             # Disable the vptr check since it gets triggered on any COM interface calls.
             san_flags.append("-fno-sanitize=vptr")
@@ -777,6 +783,7 @@ def configure_mingw(env: "SConsEnvironment"):
             "dwrite",
             "wbemuuid",
             "ntdll",
+            "hid",
         ]
     )
 
@@ -921,7 +928,8 @@ def check_d3d12_installed(env, suffix):
         print_error(
             "The Direct3D 12 rendering driver requires dependencies to be installed.\n"
             "You can install them by running `python misc\\scripts\\install_d3d12_sdk_windows.py`.\n"
-            "See the documentation for more information:\n\t"
-            "https://docs.godotengine.org/en/latest/engine_details/development/compiling/compiling_for_windows.html"
+            "See the documentation for more information:\n"
+            "\thttps://docs.godotengine.org/en/latest/engine_details/development/compiling/compiling_for_windows.html\n"
+            "Alternatively, disable this driver by compiling with `d3d12=no` explicitly."
         )
         sys.exit(255)

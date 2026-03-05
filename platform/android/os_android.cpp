@@ -38,10 +38,15 @@
 #include "java_godot_wrapper.h"
 #include "net_socket_android.h"
 
+#include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/extension/gdextension_manager.h"
+#include "core/input/input.h"
 #include "core/io/xml_parser.h"
+#include "core/object/callable_mp.h"
 #include "core/os/main_loop.h"
+#include "core/os/os.h"
+#include "core/profiling/profiling.h"
 #include "drivers/unix/dir_access_unix.h"
 #include "drivers/unix/file_access_unix.h"
 #ifdef TOOLS_ENABLED
@@ -73,6 +78,14 @@ String _remove_symlink(const String &dir) {
 	chdir(current_dir_name);
 	return dir_without_symlink;
 }
+
+#ifdef TOOLS_ENABLED
+_FORCE_INLINE_ static GameViewPlugin *_get_game_view_plugin() {
+	ERR_FAIL_NULL_V(EditorNode::get_singleton(), nullptr);
+	ERR_FAIL_NULL_V(EditorNode::get_singleton()->get_editor_main_screen(), nullptr);
+	return Object::cast_to<GameViewPlugin>(EditorNode::get_singleton()->get_editor_main_screen()->get_plugin_by_name("Game"));
+}
+#endif
 
 class AndroidLogger : public Logger {
 public:
@@ -347,7 +360,7 @@ void OS_Android::main_loop_begin() {
 
 #ifdef TOOLS_ENABLED
 	if (Engine::get_singleton()->is_editor_hint()) {
-		GameViewPlugin *game_view_plugin = Object::cast_to<GameViewPlugin>(EditorNode::get_singleton()->get_editor_main_screen()->get_plugin_by_name("Game"));
+		GameViewPlugin *game_view_plugin = _get_game_view_plugin();
 		if (game_view_plugin != nullptr) {
 			game_view_plugin->connect("main_screen_changed", callable_mp_static(&OS_Android::_on_main_screen_changed));
 		}
@@ -356,6 +369,8 @@ void OS_Android::main_loop_begin() {
 }
 
 bool OS_Android::main_loop_iterate(bool *r_should_swap_buffers) {
+	GodotProfileFrameMark;
+	GodotProfileZone("OS_Android::main_loop_iterate");
 	if (!main_loop) {
 		return false;
 	}
@@ -377,7 +392,7 @@ bool OS_Android::main_loop_iterate(bool *r_should_swap_buffers) {
 void OS_Android::main_loop_end() {
 #ifdef TOOLS_ENABLED
 	if (Engine::get_singleton()->is_editor_hint()) {
-		GameViewPlugin *game_view_plugin = Object::cast_to<GameViewPlugin>(EditorNode::get_singleton()->get_editor_main_screen()->get_plugin_by_name("Game"));
+		GameViewPlugin *game_view_plugin = _get_game_view_plugin();
 		if (game_view_plugin != nullptr) {
 			game_view_plugin->disconnect("main_screen_changed", callable_mp_static(&OS_Android::_on_main_screen_changed));
 		}
@@ -402,7 +417,7 @@ void OS_Android::_on_main_screen_changed(const String &p_screen_name) {
 #endif
 
 void OS_Android::main_loop_focusout() {
-	DisplayServerAndroid::get_singleton()->send_window_event(DisplayServer::WINDOW_EVENT_FOCUS_OUT);
+	DisplayServerAndroid::get_singleton()->send_window_event(DisplayServerEnums::WINDOW_EVENT_FOCUS_OUT);
 	if (OS::get_singleton()->get_main_loop()) {
 		OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_APPLICATION_FOCUS_OUT);
 	}
@@ -410,7 +425,7 @@ void OS_Android::main_loop_focusout() {
 }
 
 void OS_Android::main_loop_focusin() {
-	DisplayServerAndroid::get_singleton()->send_window_event(DisplayServer::WINDOW_EVENT_FOCUS_IN);
+	DisplayServerAndroid::get_singleton()->send_window_event(DisplayServerEnums::WINDOW_EVENT_FOCUS_IN);
 	if (OS::get_singleton()->get_main_loop()) {
 		OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_APPLICATION_FOCUS_IN);
 	}
@@ -867,7 +882,7 @@ bool OS_Android::_check_internal_feature_support(const String &p_feature) {
 	}
 #endif
 
-	if (godot_java->has_feature(p_feature)) {
+	if (godot_java->check_internal_feature_support(p_feature)) {
 		return true;
 	}
 

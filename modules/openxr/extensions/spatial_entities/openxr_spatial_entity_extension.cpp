@@ -31,7 +31,10 @@
 #include "openxr_spatial_entity_extension.h"
 
 #include "../../openxr_api.h"
+
 #include "core/config/project_settings.h"
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "servers/xr/xr_server.h"
 
 ////////////////////////////////////////////////////////////////////////////
@@ -106,7 +109,7 @@ OpenXRSpatialEntityExtension::~OpenXRSpatialEntityExtension() {
 	singleton = nullptr;
 }
 
-HashMap<String, bool *> OpenXRSpatialEntityExtension::get_requested_extensions() {
+HashMap<String, bool *> OpenXRSpatialEntityExtension::get_requested_extensions(XrVersion p_version) {
 	HashMap<String, bool *> request_extensions;
 
 	if (GLOBAL_GET_CACHED(bool, "xr/openxr/extensions/spatial_entity/enabled")) {

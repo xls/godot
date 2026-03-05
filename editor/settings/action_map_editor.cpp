@@ -30,6 +30,8 @@
 
 #include "action_map_editor.h"
 
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "editor/editor_string_names.h"
 #include "editor/settings/editor_event_search_bar.h"
 #include "editor/settings/editor_settings.h"
@@ -37,6 +39,7 @@
 #include "editor/settings/input_event_configuration_dialog.h"
 #include "editor/themes/editor_scale.h"
 #include "scene/gui/check_button.h"
+#include "scene/gui/margin_container.h"
 #include "scene/gui/separator.h"
 #include "scene/gui/tree.h"
 
@@ -169,7 +172,7 @@ void ActionMapEditor::_tree_button_pressed(Object *p_item, int p_column, int p_i
 			current_action_name = item->get_meta("__name");
 			current_action_event_index = -1;
 
-			event_config_dialog->popup_and_configure(Ref<InputEvent>(), current_action_name);
+			event_config_dialog->popup_and_configure(Ref<InputEvent>(), current_action_name, current_action);
 		} break;
 		case ActionMapEditor::BUTTON_EDIT_EVENT: {
 			// Action and Action name is located on the parent of the event.
@@ -180,7 +183,7 @@ void ActionMapEditor::_tree_button_pressed(Object *p_item, int p_column, int p_i
 
 			Ref<InputEvent> ie = item->get_meta("__event");
 			if (ie.is_valid()) {
-				event_config_dialog->popup_and_configure(ie, current_action_name);
+				event_config_dialog->popup_and_configure(ie, current_action_name, current_action);
 			}
 		} break;
 		case ActionMapEditor::BUTTON_REMOVE_ACTION: {
@@ -418,18 +421,6 @@ bool ActionMapEditor::_should_display_action(const String &p_name, const Array &
 	return event_match && action_list_search_bar->get_name().is_subsequence_ofn(p_name);
 }
 
-void ActionMapEditor::_highlight_subsection_action(Object *p_item, const Rect2 p_rect) {
-	TreeItem *item = Object::cast_to<TreeItem>(p_item);
-	ERR_FAIL_NULL(item);
-
-	if (item->is_selected(0)) {
-		return;
-	}
-
-	const Ref<StyleBox> &stylebox = get_theme_stylebox(SNAME("style_highlight_subsection"), EditorStringName(Editor));
-	stylebox->draw(action_tree->get_canvas_item(), p_rect);
-}
-
 void ActionMapEditor::update_action_list(const Vector<ActionInfo> &p_action_infos) {
 	if (!p_action_infos.is_empty()) {
 		actions_cache = p_action_infos;
@@ -477,8 +468,7 @@ void ActionMapEditor::update_action_list(const Vector<ActionInfo> &p_action_info
 
 		// First Column - Action Name
 		action_item->set_auto_translate_mode(0, AUTO_TRANSLATE_MODE_DISABLED);
-		action_item->set_cell_mode(0, TreeItem::CELL_MODE_CUSTOM);
-		action_item->set_custom_draw_callback(0, callable_mp(this, &ActionMapEditor::_highlight_subsection_action));
+		action_item->set_cell_mode(0, TreeItem::CELL_MODE_STRING);
 		action_item->set_text(0, action_info.name);
 		action_item->set_editable(0, action_info.editable);
 		action_item->set_icon(0, action_info.icon);
@@ -502,6 +492,8 @@ void ActionMapEditor::update_action_list(const Vector<ActionInfo> &p_action_info
 
 		action_item->set_custom_bg_color(0, get_theme_color(SNAME("prop_subsection"), EditorStringName(Editor)));
 		action_item->set_custom_bg_color(1, get_theme_color(SNAME("prop_subsection"), EditorStringName(Editor)));
+		action_item->set_custom_stylebox(0, get_theme_stylebox(SNAME("prop_subsection_stylebox_left"), EditorStringName(Editor)));
+		action_item->set_custom_stylebox(1, get_theme_stylebox(SNAME("prop_subsection_stylebox_right"), EditorStringName(Editor)));
 
 		if (selected_item.first == action_info.name) {
 			action_item->select(selected_item.second);
@@ -611,10 +603,15 @@ ActionMapEditor::ActionMapEditor() {
 
 	main_vbox->add_child(add_hbox);
 
+	MarginContainer *mc = memnew(MarginContainer);
+	mc->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	mc->set_theme_type_variation("NoBorderHorizontalBottom");
+	main_vbox->add_child(mc);
+
 	// Action Editor Tree
 	action_tree = memnew(Tree);
-	action_tree->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	action_tree->set_accessibility_name(TTRC("Action Map"));
+	action_tree->set_theme_type_variation("TreeTable");
 	action_tree->set_columns(3);
 	action_tree->set_hide_root(true);
 	action_tree->set_column_titles_visible(true);
@@ -628,7 +625,7 @@ ActionMapEditor::ActionMapEditor() {
 	action_tree->connect("item_edited", callable_mp(this, &ActionMapEditor::_action_edited), CONNECT_DEFERRED);
 	action_tree->connect("item_activated", callable_mp(this, &ActionMapEditor::_tree_item_activated));
 	action_tree->connect("button_clicked", callable_mp(this, &ActionMapEditor::_tree_button_pressed));
-	main_vbox->add_child(action_tree);
+	mc->add_child(action_tree);
 
 	SET_DRAG_FORWARDING_GCD(action_tree, ActionMapEditor);
 

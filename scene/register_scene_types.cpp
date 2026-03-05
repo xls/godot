@@ -30,6 +30,7 @@
 
 #include "register_scene_types.h"
 
+#include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
@@ -94,6 +95,7 @@
 #include "scene/gui/texture_rect.h"
 #include "scene/gui/tree.h"
 #include "scene/gui/video_stream_player.h"
+#include "scene/gui/virtual_joystick.h"
 #include "scene/main/canvas_item.h"
 #include "scene/main/canvas_layer.h"
 #include "scene/main/http_request.h"
@@ -112,6 +114,7 @@
 #include "scene/resources/audio_stream_polyphonic.h"
 #include "scene/resources/audio_stream_wav.h"
 #include "scene/resources/bit_map.h"
+#include "scene/resources/blit_material.h"
 #include "scene/resources/bone_map.h"
 #include "scene/resources/camera_attributes.h"
 #include "scene/resources/camera_texture.h"
@@ -120,6 +123,7 @@
 #include "scene/resources/compositor.h"
 #include "scene/resources/compressed_texture.h"
 #include "scene/resources/curve_texture.h"
+#include "scene/resources/drawable_texture_2d.h"
 #include "scene/resources/environment.h"
 #include "scene/resources/external_texture.h"
 #include "scene/resources/font.h"
@@ -161,6 +165,9 @@
 #include "scene/resources/visual_shader_particle_nodes.h"
 #include "scene/resources/visual_shader_sdf_nodes.h"
 #include "scene/theme/theme_db.h"
+#include "servers/display/display_server.h"
+#include "servers/rendering/rendering_server.h"
+
 #ifndef DISABLE_DEPRECATED
 #include "scene/resources/animated_texture.h"
 #endif
@@ -220,6 +227,7 @@
 #include "scene/3d/audio_stream_player_3d.h"
 #include "scene/3d/bone_attachment_3d.h"
 #include "scene/3d/bone_constraint_3d.h"
+#include "scene/3d/bone_twist_disperser_3d.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/ccd_ik_3d.h"
 #include "scene/3d/chain_ik_3d.h"
@@ -239,6 +247,7 @@
 #include "scene/3d/light_3d.h"
 #include "scene/3d/lightmap_gi.h"
 #include "scene/3d/lightmap_probe.h"
+#include "scene/3d/limit_angular_velocity_modifier_3d.h"
 #include "scene/3d/look_at_modifier_3d.h"
 #include "scene/3d/marker_3d.h"
 #include "scene/3d/mesh_instance_3d.h"
@@ -266,6 +275,8 @@
 #include "scene/animation/root_motion_view.h"
 #include "scene/resources/3d/fog_material.h"
 #include "scene/resources/3d/importer_mesh.h"
+#include "scene/resources/3d/joint_limitation_3d.h"
+#include "scene/resources/3d/joint_limitation_cone_3d.h"
 #include "scene/resources/3d/mesh_library.h"
 #include "scene/resources/3d/navigation_mesh_source_geometry_data_3d.h"
 #include "scene/resources/3d/primitive_meshes.h"
@@ -354,8 +365,6 @@
 #include "scene/resources/3d/cylinder_shape_3d.h"
 #include "scene/resources/3d/height_map_shape_3d.h"
 #include "scene/resources/3d/importer_mesh.h"
-#include "scene/resources/3d/joint_limitation_3d.h"
-#include "scene/resources/3d/joint_limitation_cone_3d.h"
 #include "scene/resources/3d/mesh_library.h"
 #include "scene/resources/3d/navigation_mesh_source_geometry_data_3d.h"
 #include "scene/resources/3d/primitive_meshes.h"
@@ -554,6 +563,8 @@ void register_scene_types() {
 	GDREGISTER_CLASS(FoldableGroup);
 	GDREGISTER_CLASS(FoldableContainer);
 
+	GDREGISTER_CLASS(VirtualJoystick);
+
 	OS::get_singleton()->yield(); // may take time to init
 
 	int swap_cancel_ok = GLOBAL_DEF(PropertyInfo(Variant::INT, "gui/common/swap_cancel_ok", PROPERTY_HINT_ENUM, "Auto,Cancel First,OK First"), 0);
@@ -575,6 +586,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(CallbackTweener);
 	GDREGISTER_CLASS(MethodTweener);
 	GDREGISTER_CLASS(SubtweenTweener);
+	GDREGISTER_CLASS(AwaitTweener);
 
 	GDREGISTER_ABSTRACT_CLASS(AnimationMixer);
 	GDREGISTER_CLASS(AnimationPlayer);
@@ -682,6 +694,8 @@ void register_scene_types() {
 	GDREGISTER_CLASS(FABRIK3D);
 	GDREGISTER_CLASS(CCDIK3D);
 	GDREGISTER_CLASS(JacobianIK3D);
+	GDREGISTER_CLASS(LimitAngularVelocityModifier3D);
+	GDREGISTER_CLASS(BoneTwistDisperser3D);
 
 #ifndef XR_DISABLED
 	GDREGISTER_CLASS(XRCamera3D);
@@ -882,8 +896,10 @@ void register_scene_types() {
 	GDREGISTER_CLASS(ShaderMaterial);
 	GDREGISTER_CLASS(CanvasTexture);
 	GDREGISTER_CLASS(CanvasItemMaterial);
+
 	SceneTree::add_idle_callback(CanvasItemMaterial::flush_changes);
 	CanvasItemMaterial::init_shaders();
+	GDREGISTER_CLASS(BlitMaterial);
 
 	/* REGISTER 2D */
 
@@ -1050,6 +1066,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(GradientTexture2D);
 	GDREGISTER_CLASS(CameraTexture);
 	GDREGISTER_CLASS(ExternalTexture);
+	GDREGISTER_CLASS(DrawableTexture2D);
 	GDREGISTER_VIRTUAL_CLASS(TextureLayered);
 	GDREGISTER_ABSTRACT_CLASS(ImageTextureLayered);
 	GDREGISTER_VIRTUAL_CLASS(Texture3D);
@@ -1468,6 +1485,7 @@ void unregister_scene_types() {
 	ParticleProcessMaterial::finish_shaders();
 	CanvasItemMaterial::finish_shaders();
 	ColorPickerShape::finish_shaders();
+	BlitMaterial::cleanup_shader();
 	GraphEdit::finish_shaders();
 	SceneStringNames::free();
 

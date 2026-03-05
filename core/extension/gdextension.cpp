@@ -32,6 +32,7 @@
 #include "gdextension.compat.inc"
 
 #include "core/config/project_settings.h"
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/object/method_bind.h"
 #include "gdextension_library_loader.h"
@@ -491,6 +492,8 @@ void GDExtension::_register_extension_class_internal(GDExtensionClassLibraryPtr 
 	}
 #endif
 
+	extension->gdextension.create_gdtype();
+
 	ClassDB::register_extension_class(&extension->gdextension);
 
 	if (p_extension_funcs->icon_path != nullptr) {
@@ -802,9 +805,6 @@ void GDExtension::_bind_methods() {
 	BIND_ENUM_CONSTANT(INITIALIZATION_LEVEL_EDITOR);
 }
 
-GDExtension::GDExtension() {
-}
-
 GDExtension::~GDExtension() {
 	if (is_library_open()) {
 		close_library();
@@ -951,7 +951,7 @@ void GDExtension::prepare_reload() {
 				state.push_back(Pair<String, Variant>(P.name, value));
 			}
 			E.value.instance_state[obj_id] = {
-				state, // List<Pair<String, Variant>> properties;
+				std::move(state), // List<Pair<String, Variant>> properties;
 				obj->is_extension_placeholder(), // bool is_placeholder;
 			};
 		}
@@ -973,6 +973,8 @@ void GDExtension::_clear_extension(Extension *p_extension) {
 
 		obj->clear_internal_extension();
 	}
+
+	p_extension->gdextension.destroy_gdtype();
 }
 
 void GDExtension::track_instance_binding(Object *p_object) {

@@ -46,6 +46,7 @@ class HSplitContainer;
 class MenuButton;
 class PanelContainer;
 class StyleBoxTexture;
+class Timer;
 class ViewPanner;
 class VScrollBar;
 class VSeparator;
@@ -76,6 +77,7 @@ class CanvasItemEditor : public VBoxContainer {
 public:
 	enum Tool {
 		TOOL_SELECT,
+		TOOL_SCENE_PAINT,
 		TOOL_LIST_SELECT,
 		TOOL_MOVE,
 		TOOL_SCALE,
@@ -145,7 +147,8 @@ private:
 		VIEW_FRAME_TO_SELECTION,
 		PREVIEW_CANVAS_SCALE,
 		SKELETON_MAKE_BONES,
-		SKELETON_SHOW_BONES
+		SKELETON_SHOW_BONES,
+		AUTO_RESAMPLE_CANVAS_ITEMS,
 	};
 
 	enum DragType {
@@ -227,7 +230,12 @@ private:
 	Point2 view_offset;
 	Point2 previous_update_view_offset;
 
+	Timer *resample_timer = nullptr;
+	bool auto_resampling_enabled = true;
+	real_t resample_delay = 0.3;
+
 	bool selected_from_canvas = false;
+	bool had_visible_selection = false;
 
 	// Defaults are defined in clear().
 	Point2 grid_offset;
@@ -238,6 +246,7 @@ private:
 	real_t snap_rotation_step = 0.0;
 	real_t snap_rotation_offset = 0.0;
 	real_t snap_scale_step = 0.0;
+	bool use_local_space = true;
 	bool smart_snap_active = false;
 	bool grid_snap_active = false;
 
@@ -271,16 +280,19 @@ private:
 
 	MenuOption last_option;
 
-	struct _SelectResult {
+public:
+	struct SelectResult {
 		CanvasItem *item = nullptr;
 		real_t z_index = 0;
 		bool has_z = true;
-		_FORCE_INLINE_ bool operator<(const _SelectResult &p_rr) const {
+		_FORCE_INLINE_ bool operator<(const SelectResult &p_rr) const {
 			return has_z && p_rr.has_z ? p_rr.z_index < z_index : p_rr.has_z;
 		}
 	};
-	Vector<_SelectResult> selection_results;
-	Vector<_SelectResult> selection_results_menu;
+
+private:
+	Vector<SelectResult> selection_results;
+	Vector<SelectResult> selection_results_menu;
 
 	struct _HoverResult {
 		Point2 position;
@@ -323,6 +335,7 @@ private:
 	Button *select_button = nullptr;
 
 	Button *move_button = nullptr;
+	Button *scene_paint_button = nullptr;
 	Button *scale_button = nullptr;
 	Button *rotate_button = nullptr;
 
@@ -332,6 +345,7 @@ private:
 
 	Button *ruler_button = nullptr;
 
+	Button *local_space_button = nullptr;
 	Button *smart_snap_button = nullptr;
 	Button *grid_snap_button = nullptr;
 	MenuButton *snap_config_menu = nullptr;
@@ -397,10 +411,9 @@ private:
 
 	bool _is_node_locked(const Node *p_node) const;
 	bool _is_node_movable(const Node *p_node, bool p_popup_warning = false);
-	void _find_canvas_items_at_pos(const Point2 &p_pos, Node *p_node, Vector<_SelectResult> &r_items, const Transform2D &p_parent_xform = Transform2D(), const Transform2D &p_canvas_xform = Transform2D());
-	void _get_canvas_items_at_pos(const Point2 &p_pos, Vector<_SelectResult> &r_items, bool p_allow_locked = false);
-
+	void _get_canvas_items_at_pos(const Point2 &p_pos, Vector<SelectResult> &r_items, bool p_allow_locked = false);
 	void _find_canvas_items_in_rect(const Rect2 &p_rect, Node *p_node, List<CanvasItem *> *r_items, const Transform2D &p_parent_xform = Transform2D(), const Transform2D &p_canvas_xform = Transform2D());
+
 	bool _select_click_on_item(CanvasItem *item, Point2 p_click_pos, bool p_append);
 
 	ConfirmationDialog *snap_dialog = nullptr;
@@ -426,10 +439,10 @@ private:
 	void _adjust_new_node_position(Node *p_node);
 	void _reset_create_position();
 	void _update_editor_settings();
-	bool _is_grid_visible() const;
 	void _prepare_grid_menu();
 	void _on_grid_menu_id_pressed(int p_id);
 	void _reset_transform(TransformType p_type);
+	void _update_oversampling();
 
 public:
 	enum ThemePreviewMode {
@@ -530,6 +543,7 @@ private:
 	void _update_zoom(real_t p_zoom);
 	void _shortcut_zoom_set(real_t p_zoom);
 	void _zoom_on_position(real_t p_zoom, Point2 p_position = Point2());
+	void _button_toggle_local_space(bool p_status);
 	void _button_toggle_smart_snap(bool p_status);
 	void _button_toggle_grid_snap(bool p_status);
 	void _button_tool_select(int p_index);
@@ -590,10 +604,15 @@ public:
 
 	Control *get_controls_container() { return controls_vb; }
 
+	void find_canvas_items_at_pos(const Point2 &p_pos, Node *p_node, Vector<SelectResult> &r_items, const Transform2D &p_parent_xform = Transform2D(), const Transform2D &p_canvas_xform = Transform2D());
+
 	void update_viewport();
 
 	Tool get_current_tool() { return tool; }
 	void set_current_tool(Tool p_tool);
+
+	bool is_grid_visible() const;
+	Vector2 get_grid_step() const { return grid_step; }
 
 	void edit(CanvasItem *p_canvas_item);
 

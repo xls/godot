@@ -54,7 +54,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Public for use with callable_mp.
+	// Public for use as signal callback.
 	void _skin_changed();
 
 	RID get_skeleton() const;
@@ -224,7 +224,6 @@ public:
 	// Skeleton creation API
 	uint64_t get_version() const;
 	int add_bone(const String &p_name);
-	void remove_bone(int p_bone);
 	int find_bone(const String &p_name) const;
 	String get_bone_name(int p_bone) const;
 	void set_bone_name(int p_bone, const String &p_name);

@@ -31,7 +31,6 @@
 #pragma once
 
 #include "core/io/resource.h"
-#include "core/object/class_db.h"
 #include "core/object/object.h"
 #include "core/object/script_language.h"
 
@@ -175,7 +174,12 @@ public:
 	void open_scene_from_path(const String &scene_path, bool p_set_inherited = false);
 	void reload_scene_from_path(const String &scene_path);
 
+	void set_object_edited(Object *p_object, bool p_edited);
+	bool is_object_edited(Object *p_object) const;
+
 	PackedStringArray get_open_scenes() const;
+	PackedStringArray get_unsaved_scenes() const;
+
 	TypedArray<Node> get_open_scene_roots() const;
 	Node *get_edited_scene_root() const;
 

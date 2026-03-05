@@ -30,6 +30,7 @@
 
 #include "os_linuxbsd.h"
 
+#include "core/profiling/profiling.h"
 #include "main/main.h"
 
 #include <unistd.h>
@@ -37,7 +38,7 @@
 #include <clocale>
 #include <cstdlib>
 
-#if defined(SANITIZERS_ENABLED)
+#if defined(ASAN_ENABLED)
 #include <sys/resource.h>
 #endif
 
@@ -87,11 +88,13 @@ int main(int argc, char *argv[]) {
 	}
 #endif
 
-#if defined(SANITIZERS_ENABLED)
+#if defined(ASAN_ENABLED)
 	// Note: Set stack size to be at least 30 MB (vs 8 MB default) to avoid overflow, address sanitizer can increase stack usage up to 3 times.
 	struct rlimit stack_lim = { 0x1E00000, 0x1E00000 };
 	setrlimit(RLIMIT_STACK, &stack_lim);
 #endif
+
+	godot_init_profiler();
 
 	OS_LinuxBSD os;
 
@@ -128,5 +131,6 @@ int main(int argc, char *argv[]) {
 	}
 	free(cwd);
 
+	godot_cleanup_profiler();
 	return os.get_exit_code();
 }

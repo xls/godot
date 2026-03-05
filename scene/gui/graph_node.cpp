@@ -30,10 +30,13 @@
 
 #include "graph_node.h"
 
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/graph_edit.h"
 #include "scene/gui/label.h"
 #include "scene/theme/theme_db.h"
+#include "servers/display/accessibility_server.h"
 
 bool GraphNode::_set(const StringName &p_name, const Variant &p_value) {
 	String str = p_name;
@@ -140,11 +143,11 @@ void GraphNode::_get_property_list(List<PropertyInfo> *p_list) const {
 		p_list->push_back(PropertyInfo(Variant::BOOL, base + "left_enabled"));
 		p_list->push_back(PropertyInfo(Variant::INT, base + "left_type"));
 		p_list->push_back(PropertyInfo(Variant::COLOR, base + "left_color"));
-		p_list->push_back(PropertyInfo(Variant::OBJECT, base + "left_icon", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_STORE_IF_NULL));
+		p_list->push_back(PropertyInfo(Variant::OBJECT, base + "left_icon", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static(), PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_STORE_IF_NULL));
 		p_list->push_back(PropertyInfo(Variant::BOOL, base + "right_enabled"));
 		p_list->push_back(PropertyInfo(Variant::INT, base + "right_type"));
 		p_list->push_back(PropertyInfo(Variant::COLOR, base + "right_color"));
-		p_list->push_back(PropertyInfo(Variant::OBJECT, base + "right_icon", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_STORE_IF_NULL));
+		p_list->push_back(PropertyInfo(Variant::OBJECT, base + "right_icon", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static(), PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_STORE_IF_NULL));
 		p_list->push_back(PropertyInfo(Variant::BOOL, base + "draw_stylebox"));
 		idx++;
 	}
@@ -580,7 +583,7 @@ void GraphNode::_notification(int p_what) {
 						}
 					}
 				}
-				if (slot.enable_left) {
+				if (slot.enable_right) {
 					if (type_info.has(slot.type_right)) {
 						name += "," + vformat(ETR("output port, type: %s"), type_info[slot.type_right]);
 					} else {
@@ -606,13 +609,13 @@ void GraphNode::_notification(int p_what) {
 			} else {
 				name += ", " + vformat(ETR("has %d slots"), slot_count);
 			}
-			DisplayServer::get_singleton()->accessibility_update_set_role(ae, DisplayServer::AccessibilityRole::ROLE_LIST);
-			DisplayServer::get_singleton()->accessibility_update_set_name(ae, name);
-			DisplayServer::get_singleton()->accessibility_update_add_custom_action(ae, CustomAccessibilityAction::ACTION_CONNECT_INPUT, ETR("Edit Input Port Connection"));
-			DisplayServer::get_singleton()->accessibility_update_add_custom_action(ae, CustomAccessibilityAction::ACTION_CONNECT_OUTPUT, ETR("Edit Output Port Connection"));
-			DisplayServer::get_singleton()->accessibility_update_add_custom_action(ae, CustomAccessibilityAction::ACTION_FOLLOW_INPUT, ETR("Follow Input Port Connection"));
-			DisplayServer::get_singleton()->accessibility_update_add_custom_action(ae, CustomAccessibilityAction::ACTION_FOLLOW_OUTPUT, ETR("Follow Output Port Connection"));
-			DisplayServer::get_singleton()->accessibility_update_add_action(ae, DisplayServer::AccessibilityAction::ACTION_CUSTOM, callable_mp(this, &GraphNode::_accessibility_action_slot));
+			AccessibilityServer::get_singleton()->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_LIST);
+			AccessibilityServer::get_singleton()->update_set_name(ae, name);
+			AccessibilityServer::get_singleton()->update_add_custom_action(ae, CustomAccessibilityAction::ACTION_CONNECT_INPUT, ETR("Edit Input Port Connection"));
+			AccessibilityServer::get_singleton()->update_add_custom_action(ae, CustomAccessibilityAction::ACTION_CONNECT_OUTPUT, ETR("Edit Output Port Connection"));
+			AccessibilityServer::get_singleton()->update_add_custom_action(ae, CustomAccessibilityAction::ACTION_FOLLOW_INPUT, ETR("Follow Input Port Connection"));
+			AccessibilityServer::get_singleton()->update_add_custom_action(ae, CustomAccessibilityAction::ACTION_FOLLOW_OUTPUT, ETR("Follow Output Port Connection"));
+			AccessibilityServer::get_singleton()->update_add_action(ae, AccessibilityServerEnums::AccessibilityAction::ACTION_CUSTOM, callable_mp(this, &GraphNode::_accessibility_action_slot));
 		} break;
 		case NOTIFICATION_FOCUS_EXIT: {
 			selected_slot = -1;
@@ -835,6 +838,19 @@ Ref<Texture2D> GraphNode::get_slot_custom_icon_left(int p_slot_index) const {
 	return slot_table[p_slot_index].custom_port_icon_left;
 }
 
+void GraphNode::set_slot_metadata_left(int p_slot_index, const Variant &p_value) {
+	ERR_FAIL_COND_MSG(!slot_table.has(p_slot_index), vformat("Cannot set left metadata for the slot with index '%d' because it hasn't been enabled.", p_slot_index));
+	slot_table[p_slot_index].metadata_left = p_value;
+}
+
+Variant GraphNode::get_slot_metadata_left(int p_slot_index) const {
+	const Slot *slot = slot_table.getptr(p_slot_index);
+	if (slot == nullptr) {
+		return Variant();
+	}
+	return slot->metadata_left;
+}
+
 bool GraphNode::is_slot_enabled_right(int p_slot_index) const {
 	if (!slot_table.has(p_slot_index)) {
 		return false;
@@ -921,6 +937,19 @@ Ref<Texture2D> GraphNode::get_slot_custom_icon_right(int p_slot_index) const {
 		return Ref<Texture2D>();
 	}
 	return slot_table[p_slot_index].custom_port_icon_right;
+}
+
+void GraphNode::set_slot_metadata_right(int p_slot_index, const Variant &p_value) {
+	ERR_FAIL_COND_MSG(!slot_table.has(p_slot_index), vformat("Cannot set right metadata for the slot with index '%d' because it hasn't been enabled.", p_slot_index));
+	slot_table[p_slot_index].metadata_right = p_value;
+}
+
+Variant GraphNode::get_slot_metadata_right(int p_slot_index) const {
+	const Slot *slot = slot_table.getptr(p_slot_index);
+	if (slot == nullptr) {
+		return Variant();
+	}
+	return slot->metadata_right;
 }
 
 bool GraphNode::is_slot_draw_stylebox(int p_slot_index) const {
@@ -1229,6 +1258,9 @@ void GraphNode::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_slot_custom_icon_left", "slot_index", "custom_icon"), &GraphNode::set_slot_custom_icon_left);
 	ClassDB::bind_method(D_METHOD("get_slot_custom_icon_left", "slot_index"), &GraphNode::get_slot_custom_icon_left);
 
+	ClassDB::bind_method(D_METHOD("set_slot_metadata_left", "slot_index", "value"), &GraphNode::set_slot_metadata_left);
+	ClassDB::bind_method(D_METHOD("get_slot_metadata_left", "slot_index"), &GraphNode::get_slot_metadata_left);
+
 	ClassDB::bind_method(D_METHOD("is_slot_enabled_right", "slot_index"), &GraphNode::is_slot_enabled_right);
 	ClassDB::bind_method(D_METHOD("set_slot_enabled_right", "slot_index", "enable"), &GraphNode::set_slot_enabled_right);
 
@@ -1240,6 +1272,9 @@ void GraphNode::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_slot_custom_icon_right", "slot_index", "custom_icon"), &GraphNode::set_slot_custom_icon_right);
 	ClassDB::bind_method(D_METHOD("get_slot_custom_icon_right", "slot_index"), &GraphNode::get_slot_custom_icon_right);
+
+	ClassDB::bind_method(D_METHOD("set_slot_metadata_right", "slot_index", "value"), &GraphNode::set_slot_metadata_right);
+	ClassDB::bind_method(D_METHOD("get_slot_metadata_right", "slot_index"), &GraphNode::get_slot_metadata_right);
 
 	ClassDB::bind_method(D_METHOD("is_slot_draw_stylebox", "slot_index"), &GraphNode::is_slot_draw_stylebox);
 	ClassDB::bind_method(D_METHOD("set_slot_draw_stylebox", "slot_index", "enable"), &GraphNode::set_slot_draw_stylebox);

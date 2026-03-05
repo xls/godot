@@ -32,6 +32,7 @@
 
 #include "audio_driver_wasapi.h"
 
+#include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/os/os.h"
 
@@ -110,10 +111,10 @@ const IID IID_IAudioClient3 = __uuidof(IAudioClient3);
 const IID IID_IAudioRenderClient = __uuidof(IAudioRenderClient);
 const IID IID_IAudioCaptureClient = __uuidof(IAudioCaptureClient);
 
-#define SAFE_RELEASE(memory)   \
+#define SAFE_RELEASE(memory) \
 	if ((memory) != nullptr) { \
-		(memory)->Release();   \
-		(memory) = nullptr;    \
+		(memory)->Release(); \
+		(memory) = nullptr; \
 	}
 
 #define REFTIMES_PER_SEC 10000000
@@ -542,6 +543,10 @@ Error AudioDriverWASAPI::init_output_device(bool p_reinit) {
 }
 
 Error AudioDriverWASAPI::init_input_device(bool p_reinit) {
+	if (audio_input.active.is_set()) {
+		return ERR_ALREADY_IN_USE;
+	}
+
 	Error err = audio_device_init(&audio_input, true, p_reinit);
 	if (err != OK) {
 		// We've tried to init the device, but have failed. Time to clean up.
@@ -1023,11 +1028,9 @@ Error AudioDriverWASAPI::input_stop() {
 	if (audio_input.active.is_set()) {
 		audio_input.audio_client->Stop();
 		audio_input.active.clear();
-
-		return OK;
 	}
 
-	return FAILED;
+	return OK;
 }
 
 PackedStringArray AudioDriverWASAPI::get_input_device_list() {

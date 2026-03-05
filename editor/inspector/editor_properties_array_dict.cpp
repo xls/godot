@@ -32,6 +32,8 @@
 
 #include "core/input/input.h"
 #include "core/io/marshalls.h"
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "editor/docks/inspector_dock.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
@@ -301,6 +303,10 @@ void EditorPropertyArray::_object_id_selected(const StringName &p_property, Obje
 	emit_signal(SNAME("object_id_selected"), p_property, p_id);
 }
 
+void EditorPropertyArray::_resource_selected(const String &p_path, Ref<Resource> p_resource) {
+	emit_signal(SNAME("resource_selected"), get_edited_property(), p_resource);
+}
+
 void EditorPropertyArray::_create_new_property_slot() {
 	int idx = slots.size();
 	HBoxContainer *hbox = memnew(HBoxContainer);
@@ -312,7 +318,7 @@ void EditorPropertyArray::_create_new_property_slot() {
 	reorder_button->set_button_icon(get_editor_theme_icon(SNAME("TripleBar")));
 	reorder_button->set_default_cursor_shape(Control::CURSOR_MOVE);
 	reorder_button->set_disabled(is_read_only());
-	reorder_button->set_theme_type_variation(SceneStringName(FlatButton));
+	reorder_button->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 	reorder_button->connect(SceneStringName(gui_input), callable_mp(this, &EditorPropertyArray::_reorder_button_gui_input));
 	reorder_button->connect(SNAME("button_up"), callable_mp(this, &EditorPropertyArray::_reorder_button_up));
 	reorder_button->connect(SNAME("button_down"), callable_mp(this, &EditorPropertyArray::_reorder_button_down).bind(idx));
@@ -328,14 +334,14 @@ void EditorPropertyArray::_create_new_property_slot() {
 		edit_btn->set_accessibility_name(TTRC("Edit"));
 		edit_btn->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
 		edit_btn->set_disabled(is_read_only());
-		edit_btn->set_theme_type_variation(SceneStringName(FlatButton));
+		edit_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		edit_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyArray::_change_type).bind(edit_btn, idx));
 	} else {
 		remove_btn = memnew(Button);
 		remove_btn->set_accessibility_name(TTRC("Remove"));
 		remove_btn->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
 		remove_btn->set_disabled(is_read_only());
-		remove_btn->set_theme_type_variation(SceneStringName(FlatButton));
+		remove_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		remove_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyArray::_remove_pressed).bind(idx));
 	}
 	property_vbox->add_child(hbox);
@@ -438,6 +444,7 @@ void EditorPropertyArray::update_property() {
 			set_bottom_editor(container);
 
 			VBoxContainer *vbox = memnew(VBoxContainer);
+			vbox->set_theme_type_variation(SNAME("EditorPropertyContainer"));
 			container->add_child(vbox);
 
 			HBoxContainer *hbox = memnew(HBoxContainer);
@@ -458,6 +465,7 @@ void EditorPropertyArray::update_property() {
 			hbox->add_child(size_slider);
 
 			property_vbox = memnew(VBoxContainer);
+			property_vbox->set_theme_type_variation(SNAME("EditorPropertyContainer"));
 			property_vbox->set_h_size_flags(SIZE_EXPAND_FILL);
 			vbox->add_child(property_vbox);
 
@@ -516,6 +524,9 @@ void EditorPropertyArray::update_property() {
 				new_prop->set_use_folding(is_using_folding());
 				new_prop->connect(SNAME("property_changed"), callable_mp(this, &EditorPropertyArray::_property_changed));
 				new_prop->connect(SNAME("object_id_selected"), callable_mp(this, &EditorPropertyArray::_object_id_selected));
+				if (value_type == Variant::OBJECT) {
+					new_prop->connect("resource_selected", callable_mp(this, &EditorPropertyArray::_resource_selected), CONNECT_DEFERRED);
+				}
 				new_prop->set_h_size_flags(SIZE_EXPAND_FILL);
 				new_prop->set_read_only(is_read_only());
 
@@ -765,6 +776,19 @@ Node *EditorPropertyArray::get_base_node() {
 
 void EditorPropertyArray::_notification(int p_what) {
 	switch (p_what) {
+		case NOTIFICATION_THEME_CHANGED: {
+			for (Slot &slot : slots) {
+				if (slot.edit_button) {
+					slot.edit_button->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
+				}
+				if (slot.reorder_button) {
+					slot.reorder_button->set_button_icon(get_editor_theme_icon(SNAME("TripleBar")));
+				}
+				if (slot.remove_button) {
+					slot.remove_button->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
+				}
+			}
+		} break;
 		case NOTIFICATION_DRAG_BEGIN: {
 			if (is_visible_in_tree()) {
 				if (_is_drop_valid(get_viewport()->gui_get_drag_data())) {
@@ -924,7 +948,7 @@ void EditorPropertyArray::_reorder_button_down(int p_slot_index) {
 	reorder_to_index = reorder_slot.index;
 	// Ideally it'd to be able to show the mouse but I had issues with
 	// Control's `mouse_exit()`/`mouse_entered()` signals not getting called.
-	Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_CAPTURED);
+	Input::get_singleton()->set_mouse_mode(Input::MouseMode::MOUSE_MODE_CAPTURED);
 }
 
 void EditorPropertyArray::_reorder_button_up() {
@@ -945,7 +969,7 @@ void EditorPropertyArray::_reorder_button_up() {
 		emit_changed(get_edited_property(), array);
 	}
 
-	Input::get_singleton()->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
+	Input::get_singleton()->set_mouse_mode(Input::MouseMode::MOUSE_MODE_VISIBLE);
 
 	ERR_FAIL_NULL(reorder_slot.reorder_button);
 	reorder_slot.reorder_button->warp_mouse(reorder_slot.reorder_button->get_size() / 2.0f);
@@ -967,6 +991,7 @@ EditorPropertyArray::EditorPropertyArray() {
 	edit->set_accessibility_name(TTRC("Edit"));
 	edit->set_h_size_flags(SIZE_EXPAND_FILL);
 	edit->set_clip_text(true);
+	edit->set_theme_type_variation(SNAME("EditorInspectorButton"));
 	edit->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyArray::_edit_pressed));
 	edit->set_toggle_mode(true);
 	SET_DRAG_FORWARDING_CD(edit, EditorPropertyArray);
@@ -1082,14 +1107,14 @@ void EditorPropertyDictionary::_create_new_property_slot(int p_idx) {
 		edit_btn->set_accessibility_name(TTRC("Edit"));
 		edit_btn->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
 		edit_btn->set_disabled(is_read_only());
-		edit_btn->set_theme_type_variation(SceneStringName(FlatButton));
+		edit_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		edit_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyDictionary::_change_type).bind(edit_btn, slots.size()));
 	} else if (p_idx >= 0) {
 		remove_btn = memnew(Button);
 		remove_btn->set_accessibility_name(TTRC("Remove"));
 		remove_btn->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
 		remove_btn->set_disabled(is_read_only());
-		remove_btn->set_theme_type_variation(SceneStringName(FlatButton));
+		remove_btn->set_theme_type_variation(SNAME("EditorInspectorFlatButton"));
 		remove_btn->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyDictionary::_remove_pressed).bind(slots.size()));
 	}
 
@@ -1294,9 +1319,11 @@ void EditorPropertyDictionary::update_property() {
 			set_bottom_editor(container);
 
 			VBoxContainer *vbox = memnew(VBoxContainer);
+			vbox->set_theme_type_variation(SNAME("EditorPropertyContainer"));
 			container->add_child(vbox);
 
 			property_vbox = memnew(VBoxContainer);
+			property_vbox->set_theme_type_variation(SNAME("EditorPropertyContainer"));
 			property_vbox->set_h_size_flags(SIZE_EXPAND_FILL);
 			vbox->add_child(property_vbox);
 
@@ -1312,6 +1339,7 @@ void EditorPropertyDictionary::update_property() {
 			property_vbox->add_child(add_panel);
 			add_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("DictionaryAddItem")));
 			VBoxContainer *add_vbox = memnew(VBoxContainer);
+			add_vbox->set_theme_type_variation(SNAME("EditorPropertyContainer"));
 			add_panel->add_child(add_vbox);
 
 			_create_new_property_slot(EditorPropertyDictionaryObject::NEW_KEY_INDEX);
@@ -1415,6 +1443,9 @@ void EditorPropertyDictionary::update_property() {
 				new_prop->set_use_folding(is_using_folding());
 				new_prop->connect(SNAME("property_changed"), callable_mp(this, &EditorPropertyDictionary::_property_changed));
 				new_prop->connect(SNAME("object_id_selected"), callable_mp(this, &EditorPropertyDictionary::_object_id_selected));
+				if (value_type == Variant::OBJECT) {
+					new_prop->connect("resource_selected", callable_mp(this, &EditorPropertyDictionary::_resource_selected), CONNECT_DEFERRED);
+				}
 				new_prop->set_h_size_flags(SIZE_EXPAND_FILL);
 				if (slot.index != EditorPropertyDictionaryObject::NEW_KEY_INDEX && slot.index != EditorPropertyDictionaryObject::NEW_VALUE_INDEX) {
 					new_prop->set_label(" ");
@@ -1477,9 +1508,22 @@ void EditorPropertyDictionary::_object_id_selected(const StringName &p_property,
 	emit_signal(SNAME("object_id_selected"), p_property, p_id);
 }
 
+void EditorPropertyDictionary::_resource_selected(const String &p_path, Ref<Resource> p_resource) {
+	emit_signal(SNAME("resource_selected"), get_edited_property(), p_resource);
+}
+
 void EditorPropertyDictionary::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_THEME_CHANGED: {
+			for (Slot &slot : slots) {
+				if (slot.edit_button) {
+					slot.edit_button->set_button_icon(get_editor_theme_icon(SNAME("Edit")));
+				}
+				if (slot.remove_button) {
+					slot.remove_button->set_button_icon(get_editor_theme_icon(SNAME("Remove")));
+				}
+			}
+
 			if (button_add_item) {
 				add_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("DictionaryAddItem")));
 			}
@@ -1525,6 +1569,7 @@ EditorPropertyDictionary::EditorPropertyDictionary() {
 	edit->set_accessibility_name(TTRC("Edit"));
 	edit->set_h_size_flags(SIZE_EXPAND_FILL);
 	edit->set_clip_text(true);
+	edit->set_theme_type_variation(SNAME("EditorInspectorButton"));
 	edit->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyDictionary::_edit_pressed));
 	edit->set_toggle_mode(true);
 	add_child(edit);
@@ -1622,9 +1667,11 @@ void EditorPropertyLocalizableString::update_property() {
 			set_bottom_editor(container);
 
 			VBoxContainer *vbox = memnew(VBoxContainer);
+			vbox->set_theme_type_variation(SNAME("EditorPropertyContainer"));
 			container->add_child(vbox);
 
 			property_vbox = memnew(VBoxContainer);
+			property_vbox->set_theme_type_variation(SNAME("EditorPropertyContainer"));
 			property_vbox->set_h_size_flags(SIZE_EXPAND_FILL);
 			vbox->add_child(property_vbox);
 
@@ -1736,6 +1783,7 @@ EditorPropertyLocalizableString::EditorPropertyLocalizableString() {
 	edit->set_accessibility_name(TTRC("Edit"));
 	edit->set_h_size_flags(SIZE_EXPAND_FILL);
 	edit->set_clip_text(true);
+	edit->set_theme_type_variation(SNAME("EditorInspectorButton"));
 	edit->connect(SceneStringName(pressed), callable_mp(this, &EditorPropertyLocalizableString::_edit_pressed));
 	edit->set_toggle_mode(true);
 	add_child(edit);

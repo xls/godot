@@ -31,11 +31,18 @@
 #include "code_edit.h"
 #include "code_edit.compat.inc"
 
+#include "core/config/engine.h"
 #include "core/config/project_settings.h"
+#include "core/input/input.h"
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "core/os/keyboard.h"
+#include "core/os/os.h"
 #include "core/string/string_builder.h"
+#include "core/string/translation_server.h"
 #include "core/string/ustring.h"
 #include "scene/theme/theme_db.h"
+#include "servers/rendering/rendering_server.h"
 
 void CodeEdit::_apply_project_settings() {
 	symbol_tooltip_timer->set_wait_time(GLOBAL_GET_CACHED(double, "gui/timers/tooltip_delay_sec"));
@@ -137,14 +144,14 @@ void CodeEdit::_notification(int p_what) {
 				/* Code completion */
 				if (draw_code_completion) {
 					const int code_completion_options_count = code_completion_options.size();
-					const int lines = MIN(code_completion_options_count, theme_cache.code_completion_max_lines);
+					int lines = MIN(code_completion_options_count, theme_cache.code_completion_max_lines);
 					const Size2 icon_area_size(row_height, row_height);
 
 					code_completion_rect.size.width = code_completion_longest_line + theme_cache.code_completion_icon_separation + icon_area_size.width + 2;
 					code_completion_rect.size.height = lines * row_height;
 
 					const Point2 caret_pos = get_caret_draw_pos();
-					const int total_height = theme_cache.code_completion_style->get_minimum_size().y + code_completion_rect.size.height;
+					int total_height = theme_cache.code_completion_style->get_minimum_size().y + code_completion_rect.size.height;
 					int min_y = caret_pos.y - row_height;
 					int max_y = caret_pos.y + row_height + total_height;
 					if (draw_code_hint) {
@@ -155,9 +162,31 @@ void CodeEdit::_notification(int p_what) {
 						}
 					}
 
-					const bool can_fit_completion_above = (min_y > total_height);
-					const bool can_fit_completion_below = (max_y <= get_size().height);
-					if (!can_fit_completion_below && can_fit_completion_above) {
+					const bool can_fit_completion_above = min_y > total_height;
+					const bool can_fit_completion_below = max_y <= get_size().height;
+
+					bool should_place_above = !can_fit_completion_below && can_fit_completion_above;
+
+					if (!can_fit_completion_below && !can_fit_completion_above) {
+						const int space_above = caret_pos.y - row_height;
+						const int space_below = get_size().height - caret_pos.y;
+						should_place_above = space_above > space_below;
+
+						// Reduce the line count and recalculate heights to better fit the completion popup.
+						int space_avail;
+						if (should_place_above) {
+							space_avail = space_above - theme_cache.code_completion_style->get_minimum_size().y;
+						} else {
+							space_avail = space_below - theme_cache.code_completion_style->get_minimum_size().y;
+						}
+
+						int max_lines_fit = MAX(1, space_avail / row_height);
+						lines = MIN(lines, max_lines_fit);
+						code_completion_rect.size.height = lines * row_height;
+						total_height = theme_cache.code_completion_style->get_minimum_size().y + code_completion_rect.size.height;
+					}
+
+					if (should_place_above) {
 						code_completion_rect.position.y = (caret_pos.y - total_height - row_height) + theme_cache.line_spacing;
 						if (draw_code_hint && !code_hint_draw_below) {
 							code_completion_rect.position.y -= code_hint_minsize.y;
@@ -436,7 +465,7 @@ void CodeEdit::gui_input(const Ref<InputEvent> &p_gui_input) {
 					if (line != -1) {
 						emit_signal(SNAME("symbol_lookup"), symbol_lookup_word, line, col);
 					}
-					return;
+					// Don't return here to pass event to TextEdit so it can clean up the mouse pressed state.
 				}
 			}
 		}
@@ -504,7 +533,7 @@ void CodeEdit::gui_input(const Ref<InputEvent> &p_gui_input) {
 	}
 
 	/* Ctrl + Hover symbols */
-	bool mac_keys = OS::get_singleton()->has_feature("macos") || OS::get_singleton()->has_feature("web_macos") || OS::get_singleton()->has_feature("web_ios");
+	bool mac_keys = OS::prefer_meta_over_ctrl();
 	if ((mac_keys && k->get_keycode() == Key::META) || (!mac_keys && k->get_keycode() == Key::CTRL)) {
 		if (symbol_lookup_on_click_enabled) {
 			if (k->is_pressed() && !is_dragging_cursor()) {
@@ -1545,7 +1574,7 @@ void CodeEdit::_line_number_draw_callback(int p_line, int p_gutter, const Rect2 
 		const String &lang = _get_locale();
 		String fc = String::num_int64(p_line + 1).lpad(line_number_digits, line_number_padding);
 		if (is_localizing_numeral_system()) {
-			fc = TS->format_number(fc, lang);
+			fc = TranslationServer::get_singleton()->format_number(fc, lang);
 		}
 
 		text_rid = TS->create_shaped_text();
@@ -2675,6 +2704,44 @@ void CodeEdit::delete_lines() {
 	end_complex_operation();
 }
 
+void CodeEdit::join_lines(const String &p_line_ending) {
+	ERR_FAIL_COND_MSG(p_line_ending.contains_char('\n'), "Cannot join lines with a newline.");
+
+	begin_complex_operation();
+	begin_multicaret_edit();
+
+	Vector<Point2i> line_ranges = get_line_ranges_from_carets();
+	int line_offset = 0;
+	for (const Point2i &line_range : line_ranges) {
+		for (int32_t line_index = line_range.x; line_index <= line_range.y; line_index++) {
+			int32_t real_line = line_index + line_offset;
+			if (real_line + 1 >= get_line_count()) {
+				break;
+			}
+			unfold_line(real_line);
+			String line = get_line(real_line);
+			int line_length = line.length();
+			int next_line_leading_whitespace_length = get_first_non_whitespace_column(real_line + 1);
+			int next_line_length = get_line(real_line + 1).length();
+			int corrected_line_length = line_length - 1;
+			for (; corrected_line_length >= 0; corrected_line_length--) {
+				if (!is_whitespace(line[corrected_line_length])) {
+					break;
+				}
+			}
+			corrected_line_length++;
+			remove_text(real_line, corrected_line_length, real_line + 1, next_line_leading_whitespace_length);
+			if (next_line_leading_whitespace_length != next_line_length && corrected_line_length != 0) {
+				insert_text(p_line_ending, real_line, corrected_line_length);
+			}
+			line_offset--;
+		}
+	}
+
+	end_multicaret_edit();
+	end_complex_operation();
+}
+
 void CodeEdit::duplicate_selection() {
 	begin_complex_operation();
 	begin_multicaret_edit();
@@ -2947,6 +3014,7 @@ void CodeEdit::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("move_lines_up"), &CodeEdit::move_lines_up);
 	ClassDB::bind_method(D_METHOD("move_lines_down"), &CodeEdit::move_lines_down);
 	ClassDB::bind_method(D_METHOD("delete_lines"), &CodeEdit::delete_lines);
+	ClassDB::bind_method(D_METHOD("join_lines", "line_ending"), &CodeEdit::join_lines, DEFVAL(" "));
 	ClassDB::bind_method(D_METHOD("duplicate_selection"), &CodeEdit::duplicate_selection);
 	ClassDB::bind_method(D_METHOD("duplicate_lines"), &CodeEdit::duplicate_lines);
 
@@ -3672,6 +3740,7 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 
 	for (ScriptLanguage::CodeCompletionOption &option : code_completion_option_sources) {
 		option.matches.clear();
+		option.matches_dirty = true;
 		if (single_quote && option.display.is_quoted()) {
 			option.display = option.display.unquote().quote("'");
 		}
@@ -3757,6 +3826,7 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 		// go through all possible matches to get the best one as defined by CodeCompletionOptionCompare
 		if (all_possible_subsequence_matches.size() > 0) {
 			option.matches = all_possible_subsequence_matches[0];
+			option.matches_dirty = true;
 			option.get_option_characteristics(string_to_complete);
 			all_possible_subsequence_matches = all_possible_subsequence_matches.slice(1);
 			if (all_possible_subsequence_matches.size() > 0) {
@@ -3765,6 +3835,7 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 				compared_option.clear_characteristics();
 				for (Vector<Pair<int, int>> &matches : all_possible_subsequence_matches) {
 					compared_option.matches = matches;
+					compared_option.matches_dirty = true;
 					compared_option.get_option_characteristics(string_to_complete);
 					if (compare(compared_option, option)) {
 						option = compared_option;

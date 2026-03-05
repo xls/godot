@@ -32,7 +32,10 @@
 
 #include "core/io/json.h"
 #include "core/io/plist.h"
-#include "core/string/translation.h"
+#include "core/object/callable_mp.h"
+#include "core/os/os.h"
+#include "core/os/process_id.h"
+#include "core/string/translation_server.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
 #include "editor/export/editor_export.h"
@@ -43,6 +46,7 @@
 #include "editor/script/script_editor_plugin.h"
 #include "editor/themes/editor_scale.h"
 #include "main/main.h"
+#include "servers/display/display_server.h"
 
 #include "modules/modules_enabled.gen.h" // For mono.
 #include "modules/svg/image_loader_svg.h"
@@ -52,7 +56,8 @@ void EditorExportPlatformAppleEmbedded::get_preset_features(const Ref<EditorExpo
 	r_features->push_back("etc2");
 	r_features->push_back("astc");
 
-	if (p_preset->get("shader_baker/enabled")) {
+	if (!p_preset->is_dedicated_server() && p_preset->get("shader_baker/enabled")) {
+		// Don't use the shader baker if exporting as a dedicated server, as no rendering is performed.
 		r_features->push_back("shader_baker");
 	}
 
@@ -131,7 +136,7 @@ static const DataCollectionInfo data_collect_type_info[] = {
 	{ "customer_support", "NSPrivacyCollectedDataTypeCustomerSupport" },
 	{ "other_user_content", "NSPrivacyCollectedDataTypeOtherUserContent" },
 	{ "browsing_history", "NSPrivacyCollectedDataTypeBrowsingHistory" },
-	{ "search_hhistory", "NSPrivacyCollectedDataTypeSearchHistory" },
+	{ "search_history", "NSPrivacyCollectedDataTypeSearchHistory" },
 	{ "user_id", "NSPrivacyCollectedDataTypeUserID" },
 	{ "device_id", "NSPrivacyCollectedDataTypeDeviceID" },
 	{ "purchase_history", "NSPrivacyCollectedDataTypePurchaseHistory" },
@@ -234,6 +239,10 @@ bool EditorExportPlatformAppleEmbedded::get_export_option_visibility(const Edito
 			p_option == "application/signature") {
 		return advanced_options_enabled;
 	}
+	if (p_option == "capabilities/performance_a12") {
+		String rendering_method = get_project_setting(Ref<EditorExportPreset>(p_preset), "rendering/renderer/rendering_method.mobile");
+		return !(rendering_method == "forward_plus" || rendering_method == "mobile");
+	}
 
 	return true;
 }
@@ -263,7 +272,7 @@ void EditorExportPlatformAppleEmbedded::get_export_options(List<ExportOption> *r
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "application/short_version", PROPERTY_HINT_PLACEHOLDER_TEXT, "Leave empty to use project version"), ""));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "application/version", PROPERTY_HINT_PLACEHOLDER_TEXT, "Leave empty to use project version"), ""));
 
-	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "application/additional_plist_content", PROPERTY_HINT_MULTILINE_TEXT), ""));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "application/additional_plist_content", PROPERTY_HINT_MULTILINE_TEXT, "monospace,no_wrap"), ""));
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::INT, "application/icon_interpolation", PROPERTY_HINT_ENUM, "Nearest neighbor,Bilinear,Cubic,Trilinear,Lanczos"), 4));
 
@@ -302,7 +311,7 @@ void EditorExportPlatformAppleEmbedded::get_export_options(List<ExportOption> *r
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "entitlements/increased_memory_limit"), false));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "entitlements/game_center"), false));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "entitlements/push_notifications", PROPERTY_HINT_ENUM, "Disabled,Production,Development"), "Disabled"));
-	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "entitlements/additional", PROPERTY_HINT_MULTILINE_TEXT), ""));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "entitlements/additional", PROPERTY_HINT_MULTILINE_TEXT, "monospace,no_wrap"), ""));
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "capabilities/access_wifi"), false));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "capabilities/performance_gaming_tier"), false));
@@ -401,7 +410,7 @@ String EditorExportPlatformAppleEmbedded::_process_config_file_line(const Ref<Ed
 	} else if (p_line.contains("$modules_buildgrp")) {
 		strnew += p_line.replace("$modules_buildgrp", p_config.modules_buildgrp) + "\n";
 	} else if (p_line.contains("$name")) {
-		strnew += p_line.replace("$name", p_config.pkg_name) + "\n";
+		strnew += p_line.replace("$name", p_config.pkg_name.xml_escape(true)) + "\n";
 	} else if (p_line.contains("$bundle_identifier")) {
 		strnew += p_line.replace("$bundle_identifier", p_preset->get("application/bundle_identifier")) + "\n";
 	} else if (p_line.contains("$short_version")) {
@@ -497,6 +506,7 @@ String EditorExportPlatformAppleEmbedded::_process_config_file_line(const Ref<Ed
 		// Note that capabilities listed here are requirements for the app to be installed.
 		// They don't enable anything.
 		Vector<String> capabilities_list = p_config.capabilities;
+		String rendering_method = get_project_setting(p_preset, "rendering/renderer/rendering_method.mobile");
 
 		if ((bool)p_preset->get("capabilities/access_wifi") && !capabilities_list.has("wifi")) {
 			capabilities_list.push_back("wifi");
@@ -504,7 +514,7 @@ String EditorExportPlatformAppleEmbedded::_process_config_file_line(const Ref<Ed
 		if ((bool)p_preset->get("capabilities/performance_gaming_tier") && !capabilities_list.has("iphone-performance-gaming-tier")) {
 			capabilities_list.push_back("iphone-performance-gaming-tier");
 		}
-		if ((bool)p_preset->get("capabilities/performance_a12") && !capabilities_list.has("iphone-ipad-minimum-performance-a12")) {
+		if (((bool)p_preset->get("capabilities/performance_a12") || rendering_method == "forward_plus" || rendering_method == "mobile") && !capabilities_list.has("iphone-ipad-minimum-performance-a12")) {
 			capabilities_list.push_back("iphone-ipad-minimum-performance-a12");
 		}
 		for (const String &capability : capabilities_list) {
@@ -517,33 +527,33 @@ String EditorExportPlatformAppleEmbedded::_process_config_file_line(const Ref<Ed
 		strnew += p_line.replace("$required_device_capabilities", capabilities);
 	} else if (p_line.contains("$interface_orientations")) {
 		String orientations;
-		const DisplayServer::ScreenOrientation screen_orientation =
-				DisplayServer::ScreenOrientation(int(get_project_setting(p_preset, "display/window/handheld/orientation")));
+		const DisplayServerEnums::ScreenOrientation screen_orientation =
+				DisplayServerEnums::ScreenOrientation(int(get_project_setting(p_preset, "display/window/handheld/orientation")));
 
 		switch (screen_orientation) {
-			case DisplayServer::SCREEN_LANDSCAPE:
+			case DisplayServerEnums::SCREEN_LANDSCAPE:
 				orientations += "<string>UIInterfaceOrientationLandscapeLeft</string>\n";
 				break;
-			case DisplayServer::SCREEN_PORTRAIT:
+			case DisplayServerEnums::SCREEN_PORTRAIT:
 				orientations += "<string>UIInterfaceOrientationPortrait</string>\n";
 				break;
-			case DisplayServer::SCREEN_REVERSE_LANDSCAPE:
+			case DisplayServerEnums::SCREEN_REVERSE_LANDSCAPE:
 				orientations += "<string>UIInterfaceOrientationLandscapeRight</string>\n";
 				break;
-			case DisplayServer::SCREEN_REVERSE_PORTRAIT:
+			case DisplayServerEnums::SCREEN_REVERSE_PORTRAIT:
 				orientations += "<string>UIInterfaceOrientationPortraitUpsideDown</string>\n";
 				break;
-			case DisplayServer::SCREEN_SENSOR_LANDSCAPE:
+			case DisplayServerEnums::SCREEN_SENSOR_LANDSCAPE:
 				// Allow both landscape orientations depending on sensor direction.
 				orientations += "<string>UIInterfaceOrientationLandscapeLeft</string>\n";
 				orientations += "<string>UIInterfaceOrientationLandscapeRight</string>\n";
 				break;
-			case DisplayServer::SCREEN_SENSOR_PORTRAIT:
+			case DisplayServerEnums::SCREEN_SENSOR_PORTRAIT:
 				// Allow both portrait orientations depending on sensor direction.
 				orientations += "<string>UIInterfaceOrientationPortrait</string>\n";
 				orientations += "<string>UIInterfaceOrientationPortraitUpsideDown</string>\n";
 				break;
-			case DisplayServer::SCREEN_SENSOR:
+			case DisplayServerEnums::SCREEN_SENSOR:
 				// Allow all screen orientations depending on sensor direction.
 				orientations += "<string>UIInterfaceOrientationLandscapeLeft</string>\n";
 				orientations += "<string>UIInterfaceOrientationLandscapeRight</string>\n";
@@ -555,33 +565,33 @@ String EditorExportPlatformAppleEmbedded::_process_config_file_line(const Ref<Ed
 		strnew += p_line.replace("$interface_orientations", orientations);
 	} else if (p_line.contains("$ipad_interface_orientations")) {
 		String orientations;
-		const DisplayServer::ScreenOrientation screen_orientation =
-				DisplayServer::ScreenOrientation(int(get_project_setting(p_preset, "display/window/handheld/orientation")));
+		const DisplayServerEnums::ScreenOrientation screen_orientation =
+				DisplayServerEnums::ScreenOrientation(int(get_project_setting(p_preset, "display/window/handheld/orientation")));
 
 		switch (screen_orientation) {
-			case DisplayServer::SCREEN_LANDSCAPE:
+			case DisplayServerEnums::SCREEN_LANDSCAPE:
 				orientations += "<string>UIInterfaceOrientationLandscapeRight</string>\n";
 				break;
-			case DisplayServer::SCREEN_PORTRAIT:
+			case DisplayServerEnums::SCREEN_PORTRAIT:
 				orientations += "<string>UIInterfaceOrientationPortrait</string>\n";
 				break;
-			case DisplayServer::SCREEN_REVERSE_LANDSCAPE:
+			case DisplayServerEnums::SCREEN_REVERSE_LANDSCAPE:
 				orientations += "<string>UIInterfaceOrientationLandscapeLeft</string>\n";
 				break;
-			case DisplayServer::SCREEN_REVERSE_PORTRAIT:
+			case DisplayServerEnums::SCREEN_REVERSE_PORTRAIT:
 				orientations += "<string>UIInterfaceOrientationPortraitUpsideDown</string>\n";
 				break;
-			case DisplayServer::SCREEN_SENSOR_LANDSCAPE:
+			case DisplayServerEnums::SCREEN_SENSOR_LANDSCAPE:
 				// Allow both landscape orientations depending on sensor direction.
 				orientations += "<string>UIInterfaceOrientationLandscapeLeft</string>\n";
 				orientations += "<string>UIInterfaceOrientationLandscapeRight</string>\n";
 				break;
-			case DisplayServer::SCREEN_SENSOR_PORTRAIT:
+			case DisplayServerEnums::SCREEN_SENSOR_PORTRAIT:
 				// Allow both portrait orientations depending on sensor direction.
 				orientations += "<string>UIInterfaceOrientationPortrait</string>\n";
 				orientations += "<string>UIInterfaceOrientationPortraitUpsideDown</string>\n";
 				break;
-			case DisplayServer::SCREEN_SENSOR:
+			case DisplayServerEnums::SCREEN_SENSOR:
 				// Allow all screen orientations depending on sensor direction.
 				orientations += "<string>UIInterfaceOrientationLandscapeLeft</string>\n";
 				orientations += "<string>UIInterfaceOrientationLandscapeRight</string>\n";
@@ -593,13 +603,13 @@ String EditorExportPlatformAppleEmbedded::_process_config_file_line(const Ref<Ed
 		strnew += p_line.replace("$ipad_interface_orientations", orientations);
 	} else if (p_line.contains("$camera_usage_description")) {
 		String description = p_preset->get("privacy/camera_usage_description");
-		strnew += p_line.replace("$camera_usage_description", description) + "\n";
+		strnew += p_line.replace("$camera_usage_description", description.xml_escape(true)) + "\n";
 	} else if (p_line.contains("$microphone_usage_description")) {
 		String description = p_preset->get("privacy/microphone_usage_description");
-		strnew += p_line.replace("$microphone_usage_description", description) + "\n";
+		strnew += p_line.replace("$microphone_usage_description", description.xml_escape(true)) + "\n";
 	} else if (p_line.contains("$photolibrary_usage_description")) {
 		String description = p_preset->get("privacy/photolibrary_usage_description");
-		strnew += p_line.replace("$photolibrary_usage_description", description) + "\n";
+		strnew += p_line.replace("$photolibrary_usage_description", description.xml_escape(true)) + "\n";
 	} else if (p_line.contains("$pbx_locale_file_reference")) {
 		String locale_files;
 		Vector<String> translations = get_project_setting(p_preset, "internationalization/locale/translations");
@@ -1915,50 +1925,59 @@ Error EditorExportPlatformAppleEmbedded::_export_project_helper(const Ref<Editor
 		return ERR_FILE_NOT_FOUND;
 	}
 
-	Dictionary appnames = get_project_setting(p_preset, "application/config/name_localized");
 	Dictionary camera_usage_descriptions = p_preset->get("privacy/camera_usage_description_localized");
 	Dictionary microphone_usage_descriptions = p_preset->get("privacy/microphone_usage_description_localized");
 	Dictionary photolibrary_usage_descriptions = p_preset->get("privacy/photolibrary_usage_description_localized");
 
-	Vector<String> translations = get_project_setting(p_preset, "internationalization/locale/translations");
-	if (translations.size() > 0) {
+	const String project_name = get_project_setting(p_preset, "application/config/name");
+	const Dictionary appnames = get_project_setting(p_preset, "application/config/name_localized");
+	const StringName domain_name = "godot.project_name_localization";
+	Ref<TranslationDomain> domain = TranslationServer::get_singleton()->get_or_add_domain(domain_name);
+	TranslationServer::get_singleton()->load_project_translations(domain);
+	const Vector<String> locales = domain->get_loaded_locales();
+
+	if (!locales.is_empty()) {
 		{
 			String fname = binary_dir + "/en.lproj";
 			tmp_app_path->make_dir_recursive(fname);
 			Ref<FileAccess> f = FileAccess::open(fname + "/InfoPlist.strings", FileAccess::WRITE);
 			f->store_line("/* Localized versions of Info.plist keys */");
 			f->store_line("");
-			f->store_line("CFBundleDisplayName = \"" + get_project_setting(p_preset, "application/config/name").operator String() + "\";");
-			f->store_line("NSCameraUsageDescription = \"" + p_preset->get("privacy/camera_usage_description").operator String() + "\";");
-			f->store_line("NSMicrophoneUsageDescription = \"" + p_preset->get("privacy/microphone_usage_description").operator String() + "\";");
-			f->store_line("NSPhotoLibraryUsageDescription = \"" + p_preset->get("privacy/photolibrary_usage_description").operator String() + "\";");
+			f->store_line("CFBundleDisplayName = \"" + project_name.xml_escape(true) + "\";");
+			f->store_line("NSCameraUsageDescription = \"" + p_preset->get("privacy/camera_usage_description").operator String().xml_escape(true) + "\";");
+			f->store_line("NSMicrophoneUsageDescription = \"" + p_preset->get("privacy/microphone_usage_description").operator String().xml_escape(true) + "\";");
+			f->store_line("NSPhotoLibraryUsageDescription = \"" + p_preset->get("privacy/photolibrary_usage_description").operator String().xml_escape(true) + "\";");
 		}
 
-		HashSet<String> languages;
-		for (const String &E : translations) {
-			Ref<Translation> tr = ResourceLoader::load(E);
-			if (tr.is_valid() && tr->get_locale() != "en") {
-				languages.insert(tr->get_locale());
+		for (const String &lang : locales) {
+			if (lang == "en") {
+				continue;
 			}
-		}
 
-		for (const String &lang : languages) {
 			String fname = binary_dir + "/" + lang + ".lproj";
 			tmp_app_path->make_dir_recursive(fname);
 			Ref<FileAccess> f = FileAccess::open(fname + "/InfoPlist.strings", FileAccess::WRITE);
 			f->store_line("/* Localized versions of Info.plist keys */");
 			f->store_line("");
-			if (appnames.has(lang)) {
-				f->store_line("CFBundleDisplayName = \"" + appnames[lang].operator String() + "\";");
+
+			if (appnames.is_empty()) {
+				domain->set_locale_override(lang);
+				const String &name = domain->translate(project_name, String());
+				if (name != project_name) {
+					f->store_line("CFBundleDisplayName = \"" + name.xml_escape(true) + "\";");
+				}
+			} else if (appnames.has(lang)) {
+				f->store_line("CFBundleDisplayName = \"" + appnames[lang].operator String().xml_escape(true) + "\";");
 			}
+
 			if (camera_usage_descriptions.has(lang)) {
-				f->store_line("NSCameraUsageDescription = \"" + camera_usage_descriptions[lang].operator String() + "\";");
+				f->store_line("NSCameraUsageDescription = \"" + camera_usage_descriptions[lang].operator String().xml_escape(true) + "\";");
 			}
 			if (microphone_usage_descriptions.has(lang)) {
-				f->store_line("NSMicrophoneUsageDescription = \"" + microphone_usage_descriptions[lang].operator String() + "\";");
+				f->store_line("NSMicrophoneUsageDescription = \"" + microphone_usage_descriptions[lang].operator String().xml_escape(true) + "\";");
 			}
 			if (photolibrary_usage_descriptions.has(lang)) {
-				f->store_line("NSPhotoLibraryUsageDescription = \"" + photolibrary_usage_descriptions[lang].operator String() + "\";");
+				f->store_line("NSPhotoLibraryUsageDescription = \"" + photolibrary_usage_descriptions[lang].operator String().xml_escape(true) + "\";");
 			}
 		}
 	}
@@ -2040,6 +2059,12 @@ Error EditorExportPlatformAppleEmbedded::_export_project_helper(const Ref<Editor
 		if (err != OK) {
 			add_message(EXPORT_MESSAGE_ERROR, TTR("Code Signing"), TTR("Code signing failed, see editor log for details."));
 			return err;
+		}
+	}
+
+	for (int i = 0; i < export_plugins.size(); i++) {
+		if (export_plugins[i]->supports_platform(Ref<EditorExportPlatform>(this))) {
+			export_plugins[i]->end_generate_apple_embedded_project(p_path, export_project_only);
 		}
 	}
 
@@ -2414,7 +2439,7 @@ void EditorExportPlatformAppleEmbedded::_check_for_changes_poll_thread(void *ud)
 						const Dictionary &device_info = devices[i];
 						const Dictionary &conn_props = device_info["connectionProperties"];
 						const Dictionary &dev_props = device_info["deviceProperties"];
-						if (conn_props["pairingState"] == "paired" && dev_props["developerModeStatus"] == "enabled") {
+						if (dev_props.has("developerModeStatus") && conn_props.has("pairingState") && conn_props.has("transportType") && conn_props["pairingState"] == "paired" && dev_props["developerModeStatus"] == "enabled") {
 							Device nd;
 							nd.id = device_info["identifier"];
 							nd.name = dev_props["name"].operator String() + " (devicectl, " + ((conn_props["transportType"] == "localNetwork") ? "network" : "wired") + ")";
@@ -2462,17 +2487,7 @@ void EditorExportPlatformAppleEmbedded::_check_for_changes_poll_thread(void *ud)
 }
 
 void EditorExportPlatformAppleEmbedded::_update_preset_status() {
-	const int preset_count = EditorExport::get_singleton()->get_export_preset_count();
-	bool has_runnable = false;
-
-	for (int i = 0; i < preset_count; i++) {
-		const Ref<EditorExportPreset> &preset = EditorExport::get_singleton()->get_export_preset(i);
-		if (preset->get_platform() == this && preset->is_runnable()) {
-			has_runnable = true;
-			break;
-		}
-	}
-
+	bool has_runnable = EditorExport::get_singleton()->get_runnable_preset_for_platform(this).is_valid();
 	if (has_runnable) {
 		has_runnable_preset.set();
 	} else {
@@ -2554,7 +2569,7 @@ int EditorExportPlatformAppleEmbedded::_execute(const String &p_path, const List
 
 	Ref<FileAccess> fa_stdout = pipe_info["stdio"];
 	Ref<FileAccess> fa_stderr = pipe_info["stderr"];
-	OS::ProcessID pid = pipe_info["pid"];
+	ProcessID pid = pipe_info["pid"];
 
 	FileReader stdout_r(fa_stdout);
 	FileReader stderr_r(fa_stderr);
@@ -2613,15 +2628,15 @@ Error EditorExportPlatformAppleEmbedded::run(const Ref<EditorExportPreset> &p_pr
 	filesystem_da->make_dir_recursive(EditorPaths::get_singleton()->get_temp_dir().path_join(id));
 	String tmp_export_path = EditorPaths::get_singleton()->get_temp_dir().path_join(id).path_join("export.ipa");
 
-#define CLEANUP_AND_RETURN(m_err)                                                                          \
-	{                                                                                                      \
+#define CLEANUP_AND_RETURN(m_err) \
+	{ \
 		if (filesystem_da->change_dir(EditorPaths::get_singleton()->get_temp_dir().path_join(id)) == OK) { \
-			filesystem_da->erase_contents_recursive();                                                     \
-			filesystem_da->change_dir("..");                                                               \
-			filesystem_da->remove(id);                                                                     \
-		}                                                                                                  \
-		return m_err;                                                                                      \
-	}                                                                                                      \
+			filesystem_da->erase_contents_recursive(); \
+			filesystem_da->change_dir(".."); \
+			filesystem_da->remove(id); \
+		} \
+		return m_err; \
+	} \
 	((void)0)
 
 	Device dev = devices[p_device];

@@ -233,7 +233,7 @@
 			The focus access mode for the internal [TabBar] node.
 		</member>
 		<member name="tabs_position" type="int" setter="set_tabs_position" getter="get_tabs_position" enum="TabContainer.TabPosition" default="0">
-			The position of the tab bar.
+			The horizontal alignment of the tabs.
 		</member>
 		<member name="tabs_rearrange_group" type="int" setter="set_tabs_rearrange_group" getter="get_tabs_rearrange_group" default="-1">
 			[TabContainer]s with the same rearrange group ID will allow dragging the tabs between them. Enable drag with [member drag_to_rearrange_enabled].
@@ -361,7 +361,7 @@
 			Icon for the left arrow button that appears when there are too many tabs to fit in the container width. Used when the button is being hovered with the cursor.
 		</theme_item>
 		<theme_item name="drop_mark" data_type="icon" type="Texture2D">
-			Icon shown to indicate where a dragged tab is gonna be dropped (see [member drag_to_rearrange_enabled]).
+			Icon shown to indicate where a dragged tab will be dropped (see [member drag_to_rearrange_enabled]).
 		</theme_item>
 		<theme_item name="increment" data_type="icon" type="Texture2D">
 			Icon for the right arrow button that appears when there are too many tabs to fit in the container width. When the button is disabled (i.e. the last tab is visible) it appears semi-transparent.

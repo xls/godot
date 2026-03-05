@@ -31,6 +31,8 @@
 #include "editor_import_blend_runner.h"
 
 #include "core/io/http_client.h"
+#include "core/object/callable_mp.h"
+#include "core/os/os.h"
 #include "editor/editor_node.h"
 #include "editor/file_system/editor_file_system.h"
 #include "editor/settings/editor_settings.h"
@@ -159,20 +161,28 @@ Error EditorImportBlendRunner::start_blender(const String &p_python_script, bool
 
 	List<String> args;
 	args.push_back("--background");
+	args.push_back("--python-exit-code");
+	args.push_back("1");
 	args.push_back("--python-expr");
 	args.push_back(p_python_script);
 
 	Error err;
+	String str;
 	if (p_blocking) {
 		int exitcode = 0;
-		err = OS::get_singleton()->execute(blender_path, args, nullptr, &exitcode);
+		err = OS::get_singleton()->execute(blender_path, args, &str, &exitcode, true);
 		if (exitcode != 0) {
+			print_error(vformat("Blender import failed: %s.", str));
 			return FAILED;
 		}
 	} else {
 		err = OS::get_singleton()->create_process(blender_path, args, &blender_pid);
 	}
 	return err;
+}
+
+bool EditorImportBlendRunner::is_running() {
+	return blender_pid != 0 && OS::get_singleton()->is_process_running(blender_pid);
 }
 
 Error EditorImportBlendRunner::do_import(const Dictionary &p_options) {

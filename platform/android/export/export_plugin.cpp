@@ -33,11 +33,16 @@
 #include "logo_svg.gen.h"
 #include "run_icon_svg.gen.h"
 
+#include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/image_loader.h"
 #include "core/io/json.h"
 #include "core/io/marshalls.h"
+#include "core/math/random_pcg.h"
+#include "core/object/callable_mp.h"
+#include "core/os/os.h"
+#include "core/string/translation_server.h"
 #include "core/version.h"
 #include "editor/editor_log.h"
 #include "editor/editor_node.h"
@@ -58,7 +63,12 @@
 #endif
 
 #ifdef ANDROID_ENABLED
+#include "../java_godot_wrapper.h"
 #include "../os_android.h"
+#include "android_editor_gradle_runner.h"
+#endif
+
+#ifndef ANDROID_ENABLED
 #endif
 
 static const char *ANDROID_PERMS[] = {
@@ -136,6 +146,7 @@ static const char *ANDROID_PERMS[] = {
 	"MANAGE_APP_TOKENS",
 	"MANAGE_DOCUMENTS",
 	"MANAGE_EXTERNAL_STORAGE",
+	"MANAGE_MEDIA",
 	"MASTER_CLEAR",
 	"MEDIA_CONTENT_CONTROL",
 	"MODIFY_AUDIO_SETTINGS",
@@ -282,10 +293,16 @@ static const char *APK_ASSETS_DIRECTORY = "src/main/assets";
 static const char *AAB_ASSETS_DIRECTORY = "assetPackInstallTime/src/main/assets";
 
 static const int DEFAULT_MIN_SDK_VERSION = 24; // Should match the value in 'platform/android/java/app/config.gradle#minSdk'
-static const int DEFAULT_TARGET_SDK_VERSION = 35; // Should match the value in 'platform/android/java/app/config.gradle#targetSdk'
+static const int DEFAULT_TARGET_SDK_VERSION = 36; // Should match the value in 'platform/android/java/app/config.gradle#targetSdk'
 
 #ifndef ANDROID_ENABLED
 void EditorExportPlatformAndroid::_check_for_changes_poll_thread(void *ud) {
+	if (!EditorSettings::get_singleton()) {
+		// Some methods called here query editor settings, so we need it to be ready first.
+		// If it's not ready yet, just wait for the next iteration.
+		return;
+	}
+
 	EditorExportPlatformAndroid *ea = static_cast<EditorExportPlatformAndroid *>(ud);
 
 	while (!ea->quit_request.is_set()) {
@@ -454,23 +471,29 @@ void EditorExportPlatformAndroid::_check_for_changes_poll_thread(void *ud) {
 }
 
 void EditorExportPlatformAndroid::_update_preset_status() {
-	const int preset_count = EditorExport::get_singleton()->get_export_preset_count();
-	bool has_runnable = false;
-
-	for (int i = 0; i < preset_count; i++) {
-		const Ref<EditorExportPreset> &preset = EditorExport::get_singleton()->get_export_preset(i);
-		if (preset->get_platform() == this && preset->is_runnable()) {
-			has_runnable = true;
-			break;
-		}
-	}
-
+	bool has_runnable = EditorExport::get_singleton()->get_runnable_preset_for_platform(this).is_valid();
 	if (has_runnable) {
 		has_runnable_preset.set();
+		_start_check_for_changes_poll_thread();
 	} else {
 		has_runnable_preset.clear();
+		_stop_check_for_changes_poll_thread();
 	}
 	devices_changed.set();
+}
+
+void EditorExportPlatformAndroid::_start_check_for_changes_poll_thread() {
+	quit_request.clear();
+	if (!check_for_changes_thread.is_started()) {
+		check_for_changes_thread.start(_check_for_changes_poll_thread, this);
+	}
+}
+
+void EditorExportPlatformAndroid::_stop_check_for_changes_poll_thread() {
+	quit_request.set();
+	if (check_for_changes_thread.is_started()) {
+		check_for_changes_thread.wait_to_finish();
+	}
 }
 #endif
 
@@ -764,7 +787,7 @@ Error EditorExportPlatformAndroid::store_in_apk(APKExportData *ed, const String 
 	return OK;
 }
 
-Error EditorExportPlatformAndroid::save_apk_so(void *p_userdata, const SharedObject &p_so) {
+Error EditorExportPlatformAndroid::save_apk_so(const Ref<EditorExportPreset> &p_preset, void *p_userdata, const SharedObject &p_so) {
 	if (!p_so.path.get_file().begins_with("lib")) {
 		String err = "Android .so file names must start with \"lib\", but got: " + p_so.path;
 		ERR_PRINT(err);
@@ -798,19 +821,24 @@ Error EditorExportPlatformAndroid::save_apk_so(void *p_userdata, const SharedObj
 	return OK;
 }
 
-Error EditorExportPlatformAndroid::save_apk_file(void *p_userdata, const String &p_path, const Vector<uint8_t> &p_data, int p_file, int p_total, const Vector<String> &p_enc_in_filters, const Vector<String> &p_enc_ex_filters, const Vector<uint8_t> &p_key, uint64_t p_seed) {
+Error EditorExportPlatformAndroid::save_apk_file(const Ref<EditorExportPreset> &p_preset, void *p_userdata, const String &p_path, const Vector<uint8_t> &p_data, int p_file, int p_total, const Vector<String> &p_enc_in_filters, const Vector<String> &p_enc_ex_filters, const Vector<uint8_t> &p_key, uint64_t p_seed, bool p_delta) {
 	APKExportData *ed = static_cast<APKExportData *>(p_userdata);
 
 	const String simplified_path = simplify_path(p_path);
 
 	Vector<uint8_t> enc_data;
 	EditorExportPlatform::SavedData sd;
-	Error err = _store_temp_file(simplified_path, p_data, p_enc_in_filters, p_enc_ex_filters, p_key, p_seed, enc_data, sd);
+	Error err = _store_temp_file(simplified_path, p_data, p_enc_in_filters, p_enc_ex_filters, p_key, p_seed, p_delta, enc_data, sd);
 	if (err != OK) {
 		return err;
 	}
 
-	const String dst_path = String("assets/") + simplified_path.trim_prefix("res://");
+	String dst_path;
+	if (ed->pd.salt.length() == 32) {
+		dst_path = String("assets/") + (simplified_path + ed->pd.salt).sha256_text();
+	} else {
+		dst_path = String("assets/") + simplified_path.trim_prefix("res://");
+	}
 	print_verbose("Saving project files from " + simplified_path + " into " + dst_path);
 	store_in_apk(ed, dst_path, enc_data, _should_compress_asset(simplified_path, enc_data) ? Z_DEFLATED : 0);
 
@@ -819,11 +847,11 @@ Error EditorExportPlatformAndroid::save_apk_file(void *p_userdata, const String 
 	return OK;
 }
 
-Error EditorExportPlatformAndroid::ignore_apk_file(void *p_userdata, const String &p_path, const Vector<uint8_t> &p_data, int p_file, int p_total, const Vector<String> &p_enc_in_filters, const Vector<String> &p_enc_ex_filters, const Vector<uint8_t> &p_key, uint64_t p_seed) {
+Error EditorExportPlatformAndroid::ignore_apk_file(const Ref<EditorExportPreset> &p_preset, void *p_userdata, const String &p_path, const Vector<uint8_t> &p_data, int p_file, int p_total, const Vector<String> &p_enc_in_filters, const Vector<String> &p_enc_ex_filters, const Vector<uint8_t> &p_key, uint64_t p_seed, bool p_delta) {
 	return OK;
 }
 
-Error EditorExportPlatformAndroid::copy_gradle_so(void *p_userdata, const SharedObject &p_so) {
+Error EditorExportPlatformAndroid::copy_gradle_so(const Ref<EditorExportPreset> &p_preset, void *p_userdata, const SharedObject &p_so) {
 	ERR_FAIL_COND_V_MSG(!p_so.path.get_file().begins_with("lib"), FAILED,
 			"Android .so file names must start with \"lib\", but got: " + p_so.path);
 	Vector<ABI> abis = get_abis();
@@ -1032,8 +1060,11 @@ void EditorExportPlatformAndroid::_write_tmp_manifest(const Ref<EditorExportPres
 		if (export_plugins[i]->supports_platform(Ref<EditorExportPlatform>(this))) {
 			const String contents = export_plugins[i]->get_android_manifest_element_contents(Ref<EditorExportPlatform>(this), p_debug);
 			if (!contents.is_empty()) {
+				const String export_plugin_name = export_plugins[i]->get_name();
+				manifest_text += "<!-- Start of manifest element contents from " + export_plugin_name + " -->\n";
 				manifest_text += contents;
 				manifest_text += "\n";
+				manifest_text += "<!-- End of manifest element contents from " + export_plugin_name + " -->\n";
 			}
 		}
 	}
@@ -1190,7 +1221,7 @@ void EditorExportPlatformAndroid::_fix_manifest(const Ref<EditorExportPreset> &p
 	String package_name = p_preset->get("package/unique_name");
 
 	const int screen_orientation =
-			_get_android_orientation_value(DisplayServer::ScreenOrientation(int(get_project_setting(p_preset, "display/window/handheld/orientation"))));
+			_get_android_orientation_value(DisplayServerEnums::ScreenOrientation(int(get_project_setting(p_preset, "display/window/handheld/orientation"))));
 
 	bool screen_support_small = p_preset->get("screen/support_small");
 	bool screen_support_normal = p_preset->get("screen/support_normal");
@@ -1769,8 +1800,11 @@ void EditorExportPlatformAndroid::_fix_resources(const Ref<EditorExportPreset> &
 
 	Vector<String> string_table;
 
-	String package_name = p_preset->get("package/name");
-	Dictionary appnames = get_project_setting(p_preset, "application/config/name_localized");
+	const String project_name = get_project_name(p_preset, p_preset->get("package/name"));
+	const Dictionary appnames = get_project_setting(p_preset, "application/config/name_localized");
+	const StringName domain_name = "godot.project_name_localization";
+	Ref<TranslationDomain> domain = TranslationServer::get_singleton()->get_or_add_domain(domain_name);
+	TranslationServer::get_singleton()->load_project_translations(domain);
 
 	for (uint32_t i = 0; i < string_count; i++) {
 		uint32_t offset = decode_uint32(&r_manifest[string_table_begins + i * 4]);
@@ -1778,23 +1812,23 @@ void EditorExportPlatformAndroid::_fix_resources(const Ref<EditorExportPreset> &
 
 		String str = _parse_string(&r_manifest[offset], string_flags & UTF8_FLAG);
 
-		if (str.begins_with("godot-project-name")) {
-			if (str == "godot-project-name") {
-				//project name
-				str = get_project_name(p_preset, package_name);
+		if (str == "godot-project-name") {
+			str = project_name;
+		} else if (str.begins_with("godot-project-name")) {
+			String lang = str.substr(str.rfind_char('-') + 1).replace_char('-', '_');
 
+			if (appnames.is_empty()) {
+				domain->set_locale_override(lang);
+				str = domain->translate(project_name, String());
 			} else {
-				String lang = str.substr(str.rfind_char('-') + 1).replace_char('-', '_');
-				if (appnames.has(lang)) {
-					str = appnames[lang];
-				} else {
-					str = get_project_name(p_preset, package_name);
-				}
+				str = appnames.get(lang, project_name);
 			}
 		}
 
 		string_table.push_back(str);
 	}
+
+	TranslationServer::get_singleton()->remove_domain(domain_name);
 
 	//write a new string table, but use 16 bits
 	Vector<uint8_t> ret;
@@ -1973,7 +2007,8 @@ void EditorExportPlatformAndroid::get_preset_features(const Ref<EditorExportPres
 	r_features->push_back("etc2");
 	r_features->push_back("astc");
 
-	if (p_preset->get("shader_baker/enabled")) {
+	if (!p_preset->is_dedicated_server() && p_preset->get("shader_baker/enabled")) {
+		// Don't use the shader baker if exporting as a dedicated server, as no rendering is performed.
 		r_features->push_back("shader_baker");
 	}
 
@@ -2009,6 +2044,11 @@ String EditorExportPlatformAndroid::get_export_option_warning(const EditorExport
 			if (!enabled_deprecated_plugins_names.is_empty() && !gradle_build_enabled) {
 				return TTR("\"Use Gradle Build\" must be enabled to use the plugins.");
 			}
+#ifdef ANDROID_ENABLED
+			if (gradle_build_enabled) {
+				return TTR("Support for \"Use Gradle Build\" on Android is currently experimental.");
+			}
+#endif // ANDROID_ENABLED
 		} else if (p_name == "gradle_build/compress_native_libraries") {
 			bool gradle_build_enabled = p_preset->get("gradle_build/use_gradle_build");
 			if (bool(p_preset->get("gradle_build/compress_native_libraries")) && !gradle_build_enabled) {
@@ -2094,7 +2134,7 @@ void EditorExportPlatformAndroid::get_export_options(List<ExportOption> *r_optio
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "custom_template/debug", PROPERTY_HINT_GLOBAL_FILE, "*.apk"), ""));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "custom_template/release", PROPERTY_HINT_GLOBAL_FILE, "*.apk"), ""));
 
-	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "gradle_build/use_gradle_build"), false, true, true));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "gradle_build/use_gradle_build"), false, true, false));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "gradle_build/gradle_build_directory", PROPERTY_HINT_PLACEHOLDER_TEXT, "res://android"), "", false, false));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "gradle_build/android_source_template", PROPERTY_HINT_GLOBAL_FILE, "*.zip"), ""));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "gradle_build/compress_native_libraries"), false, false, true));
@@ -2171,11 +2211,11 @@ void EditorExportPlatformAndroid::get_export_options(List<ExportOption> *r_optio
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "user_data_backup/allow"), false));
 
-	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "command_line/extra_args"), ""));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "command_line/extra_args", PROPERTY_HINT_NONE, "monospace"), ""));
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "apk_expansion/enable"), false, false, true));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "apk_expansion/SALT"), ""));
-	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "apk_expansion/public_key", PROPERTY_HINT_MULTILINE_TEXT), "", false, true));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::STRING, "apk_expansion/public_key", PROPERTY_HINT_MULTILINE_TEXT, "monospace,no_wrap"), "", false, true));
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::PACKED_STRING_ARRAY, "permissions/custom_permissions"), PackedStringArray()));
 
@@ -2251,6 +2291,7 @@ bool EditorExportPlatformAndroid::should_update_export_options() {
 	return false;
 }
 
+#ifndef ANDROID_ENABLED
 bool EditorExportPlatformAndroid::poll_export() {
 	bool dc = devices_changed.is_set();
 	if (dc) {
@@ -2349,14 +2390,14 @@ Error EditorExportPlatformAndroid::run(const Ref<EditorExportPreset> &p_preset, 
 
 	String tmp_export_path = EditorPaths::get_singleton()->get_temp_dir().path_join("tmpexport." + uitos(OS::get_singleton()->get_unix_time()) + ".apk");
 
-#define CLEANUP_AND_RETURN(m_err)                                        \
-	{                                                                    \
-		DirAccess::remove_file_or_error(tmp_export_path);                \
-		if (FileAccess::exists(tmp_export_path + ".idsig")) {            \
+#define CLEANUP_AND_RETURN(m_err) \
+	{ \
+		DirAccess::remove_file_or_error(tmp_export_path); \
+		if (FileAccess::exists(tmp_export_path + ".idsig")) { \
 			DirAccess::remove_file_or_error(tmp_export_path + ".idsig"); \
-		}                                                                \
-		return m_err;                                                    \
-	}                                                                    \
+		} \
+		return m_err; \
+	} \
 	((void)0)
 
 	// Export to temporary APK before sending to device.
@@ -2556,7 +2597,7 @@ Error EditorExportPlatformAndroid::run(const Ref<EditorExportPreset> &p_preset, 
 		print_verbose(output);
 		if (err || rv != 0 || output.contains("Error: Activity not started")) {
 			// The implicit launch failed, let's try an explicit launch by specifying the component name before giving up.
-			const String component_name = get_package_name(p_preset, package_name) + "/com.godot.game.GodotApp";
+			const String component_name = get_package_name(p_preset, package_name) + "/com.godot.game.GodotAppLauncher";
 			print_line("Implicit launch failed... Trying explicit launch using", component_name);
 			args.erase(get_package_name(p_preset, package_name));
 			args.push_back("-n");
@@ -2576,6 +2617,7 @@ Error EditorExportPlatformAndroid::run(const Ref<EditorExportPreset> &p_preset, 
 	CLEANUP_AND_RETURN(OK);
 #undef CLEANUP_AND_RETURN
 }
+#endif // ANDROID_ENABLED
 
 Ref<Texture2D> EditorExportPlatformAndroid::get_run_icon() const {
 	return run_icon;
@@ -2883,10 +2925,6 @@ bool EditorExportPlatformAndroid::has_valid_export_configuration(const Ref<Edito
 			err += template_err;
 		}
 	} else {
-#ifdef ANDROID_ENABLED
-		err += TTR("Gradle build is not supported for the Android editor.") + "\n";
-		valid = false;
-#else
 		// Validate the custom gradle android source template.
 		bool android_source_template_valid = false;
 		const String android_source_template = p_preset->get("gradle_build/android_source_template");
@@ -2909,7 +2947,6 @@ bool EditorExportPlatformAndroid::has_valid_export_configuration(const Ref<Edito
 		}
 
 		valid = installed_android_build_template && !r_missing_templates;
-#endif
 	}
 
 	// Validate the rest of the export configuration.
@@ -3105,8 +3142,12 @@ bool EditorExportPlatformAndroid::has_valid_project_configuration(const Ref<Edit
 
 List<String> EditorExportPlatformAndroid::get_binary_extensions(const Ref<EditorExportPreset> &p_preset) const {
 	List<String> list;
-	list.push_back("apk");
-	list.push_back("aab");
+	int export_format = int(p_preset->get("gradle_build/export_format"));
+	if (export_format == EXPORT_FORMAT_AAB) {
+		list.push_back("aab");
+	} else {
+		list.push_back("apk");
+	}
 	return list;
 }
 
@@ -3520,7 +3561,7 @@ Error EditorExportPlatformAndroid::_generate_sparse_pck_metadata(const Ref<Edito
 	int64_t pck_start_pos = ftmp->get_position();
 	uint64_t file_base_ofs = 0;
 	uint64_t dir_base_ofs = 0;
-	EditorExportPlatform::_store_header(ftmp, p_preset->get_enc_pck() && p_preset->get_enc_directory(), true, file_base_ofs, dir_base_ofs);
+	EditorExportPlatform::_store_header(ftmp, p_preset->get_enc_pck() && p_preset->get_enc_directory(), true, file_base_ofs, dir_base_ofs, p_pack_data.salt);
 
 	// Write directory.
 	uint64_t dir_offset = ftmp->get_position();
@@ -3571,6 +3612,30 @@ Error EditorExportPlatformAndroid::_generate_sparse_pck_metadata(const Ref<Edito
 
 	return OK;
 }
+
+#ifdef ANDROID_ENABLED
+// Copies the given keystore to temp file.
+// Returns the new path on success, or an empty String on failure.
+static String _copy_keystore_to_temp(const String &p_keystore_path, const String &p_build_path, const String &p_name) {
+	Error err;
+	PackedByteArray keystore_data = FileAccess::get_file_as_bytes(p_keystore_path, &err);
+	if (err != OK) {
+		return String();
+	}
+
+	String temp_dir = p_build_path + "/.android";
+	String temp_filename = temp_dir + "/" + p_name;
+
+	DirAccess::make_dir_recursive_absolute(temp_dir);
+	Ref<FileAccess> temp_file = FileAccess::open(temp_filename, FileAccess::WRITE);
+	if (!temp_file.is_valid()) {
+		return String();
+	}
+
+	temp_file->store_buffer(keystore_data);
+	return temp_filename;
+}
+#endif
 
 Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, int export_format, bool should_sign, BitField<EditorExportPlatform::DebugFlags> p_flags) {
 	ExportNotifier notifier(*this, p_preset, p_debug, p_path, p_flags);
@@ -3659,6 +3724,7 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 			}
 		}
 		const String assets_directory = get_assets_directory(p_preset, export_format);
+#ifndef ANDROID_ENABLED
 		String java_sdk_path = EDITOR_GET("export/android/java_sdk_path");
 		if (java_sdk_path.is_empty()) {
 			add_message(EXPORT_MESSAGE_ERROR, TTR("Export"), TTR("Java SDK path must be configured in Editor Settings at 'export/android/java_sdk_path'."));
@@ -3672,6 +3738,7 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 			return ERR_UNCONFIGURED;
 		}
 		print_verbose("Android sdk path: " + sdk_path);
+#endif
 
 		// TODO: should we use "package/name" or "application/config/name"?
 		String project_name = get_project_name(p_preset, p_preset->get("package/name"));
@@ -3701,6 +3768,12 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 			} else {
 				user_data.pd.path = "assets.sparsepck";
 				user_data.pd.use_sparse_pck = true;
+				if (p_preset->get_enc_directory()) {
+					RandomPCG rng = RandomPCG(p_preset->get_seed());
+					for (int i = 0; i < 32; i++) {
+						user_data.pd.salt += String::chr(1 + rng.rand() % 254);
+					}
+				}
 				err = export_project_files(p_preset, p_debug, rename_and_store_file_in_gradle_project, nullptr, &user_data, copy_gradle_so);
 
 				Vector<uint8_t> enc_data;
@@ -3732,14 +3805,17 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 				return err;
 			}
 		}
+
 		print_verbose("Storing command line flags...");
 		store_file_at_path(assets_directory + "/_cl_", command_line_flags);
 
+#ifndef ANDROID_ENABLED
 		print_verbose("Updating JAVA_HOME environment to " + java_sdk_path);
 		OS::get_singleton()->set_environment("JAVA_HOME", java_sdk_path);
 
 		print_verbose("Updating ANDROID_HOME environment to " + sdk_path);
 		OS::get_singleton()->set_environment("ANDROID_HOME", sdk_path);
+#endif
 		String build_command;
 
 #ifdef WINDOWS_ENABLED
@@ -3826,8 +3902,10 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 
 		String addons_directory = ProjectSettings::get_singleton()->globalize_path("res://addons");
 
+#ifndef ANDROID_ENABLED
 		cmdline.push_back("-p"); // argument to specify the start directory.
 		cmdline.push_back(build_path); // start directory.
+#endif
 		cmdline.push_back("-Paddons_directory=" + addons_directory); // path to the addon directory as it may contain jar or aar dependencies
 		cmdline.push_back("-Pexport_package_name=" + package_name); // argument to specify the package name.
 		cmdline.push_back("-Pexport_version_code=" + version_code); // argument to specify the version code.
@@ -3866,6 +3944,16 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 					add_message(EXPORT_MESSAGE_ERROR, TTR("Code Signing"), TTR("Could not find debug keystore, unable to export."));
 					return ERR_FILE_CANT_OPEN;
 				}
+#ifdef ANDROID_ENABLED
+				// The GABE app only has access to the project directory.
+				// Since the keystore can be anywhere in the filesystem, so we need to copy this to temp file.
+				String new_debug_keystore = _copy_keystore_to_temp(debug_keystore, build_path, "debug.keystore");
+				if (new_debug_keystore.is_empty()) {
+					add_message(EXPORT_MESSAGE_ERROR, TTR("Code Signing"), TTR("Failed to copy debug keystore to temp directory."));
+				} else {
+					debug_keystore = new_debug_keystore;
+				}
+#endif
 
 				cmdline.push_back("-Pdebug_keystore_file=" + debug_keystore); // argument to specify the debug keystore file.
 				cmdline.push_back("-Pdebug_keystore_alias=" + debug_user); // argument to specify the debug keystore alias.
@@ -3882,6 +3970,16 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 					add_message(EXPORT_MESSAGE_ERROR, TTR("Code Signing"), TTR("Could not find release keystore, unable to export."));
 					return ERR_FILE_CANT_OPEN;
 				}
+#ifdef ANDROID_ENABLED
+				// The GABE app only has access to the project directory.
+				// Since the keystore can be anywhere in the filesystem, so we need to copy this to temp file.
+				String new_release_keystore = _copy_keystore_to_temp(release_keystore, build_path, "release.keystore");
+				if (new_release_keystore.is_empty()) {
+					add_message(EXPORT_MESSAGE_ERROR, TTR("Code Signing"), TTR("Failed to copy release keystore to temp directory."));
+				} else {
+					release_keystore = new_release_keystore;
+				}
+#endif
 
 				cmdline.push_back("-Prelease_keystore_file=" + release_keystore); // argument to specify the release keystore file.
 				cmdline.push_back("-Prelease_keystore_alias=" + release_username); // argument to specify the release keystore alias.
@@ -3889,21 +3987,14 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 			}
 		}
 
-		String build_project_output;
-		int result = EditorNode::get_singleton()->execute_and_show_output(TTR("Building Android Project (gradle)"), build_command, cmdline, true, false, &build_project_output);
-		if (result != 0) {
-			add_message(EXPORT_MESSAGE_ERROR, TTR("Export"), TTR("Building of Android project failed, check output for the error:") + "\n\n" + build_project_output);
-			return ERR_CANT_CREATE;
-		} else {
-			print_verbose(build_project_output);
-		}
-
 		List<String> copy_args;
 		String copy_command = "copyAndRenameBinary";
 		copy_args.push_back(copy_command);
 
+#ifndef ANDROID_ENABLED
 		copy_args.push_back("-p"); // argument to specify the start directory.
 		copy_args.push_back(build_path); // start directory.
+#endif
 
 		copy_args.push_back("-Pexport_edition=" + edition.to_lower());
 
@@ -3922,6 +4013,25 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 		copy_args.push_back("-Pexport_path=file:" + export_path);
 		copy_args.push_back("-Pexport_filename=" + export_filename);
 
+#ifdef ANDROID_ENABLED
+		String project_path = ProjectSettings::get_singleton()->globalize_path("res://");
+		android_editor_gradle_runner->run_gradle(
+				project_path,
+				build_path.substr(project_path.length()),
+				export_path.path_join(export_filename),
+				export_format_arg,
+				cmdline,
+				copy_args);
+#else
+		String build_project_output;
+		int result = EditorNode::get_singleton()->execute_and_show_output(TTR("Building Android Project (gradle)"), build_command, cmdline, true, false, &build_project_output);
+		if (result != 0) {
+			add_message(EXPORT_MESSAGE_ERROR, TTR("Export"), TTR("Building of Android project failed, check output for the error:") + "\n\n" + build_project_output);
+			return ERR_CANT_CREATE;
+		} else {
+			print_verbose(build_project_output);
+		}
+
 		print_verbose("Copying Android binary using gradle command: " + String("\n") + build_command + " " + join_list(copy_args, String(" ")));
 		String copy_binary_output;
 		int copy_result = EditorNode::get_singleton()->execute_and_show_output(TTR("Moving output"), build_command, copy_args, true, false, &copy_binary_output);
@@ -3933,6 +4043,7 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 		}
 
 		print_verbose("Successfully completed Android gradle build.");
+#endif
 		return OK;
 	}
 	// This is the start of the Legacy build system
@@ -3975,11 +4086,11 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 
 	String tmp_unaligned_path = EditorPaths::get_singleton()->get_temp_dir().path_join("tmpexport-unaligned." + uitos(OS::get_singleton()->get_unix_time()) + ".apk");
 
-#define CLEANUP_AND_RETURN(m_err)                            \
-	{                                                        \
+#define CLEANUP_AND_RETURN(m_err) \
+	{ \
 		DirAccess::remove_file_or_error(tmp_unaligned_path); \
-		return m_err;                                        \
-	}                                                        \
+		return m_err; \
+	} \
 	((void)0)
 
 	zipFile unaligned_apk = zipOpen2(tmp_unaligned_path.utf8().get_data(), APPEND_STATUS_CREATE, nullptr, &io2);
@@ -4170,6 +4281,12 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 			ed.apk = unaligned_apk;
 			ed.pd.path = "assets.sparsepck";
 			ed.pd.use_sparse_pck = true;
+			if (p_preset->get_enc_directory()) {
+				RandomPCG rng = RandomPCG(p_preset->get_seed());
+				for (int i = 0; i < 32; i++) {
+					ed.pd.salt += String::chr(1 + rng.rand() % 254);
+				}
+			}
 			err = export_project_files(p_preset, p_debug, save_apk_file, nullptr, &ed, save_apk_so);
 
 			Vector<uint8_t> enc_data;
@@ -4324,24 +4441,26 @@ void EditorExportPlatformAndroid::initialize() {
 		ImageLoaderSVG::create_image_from_string(img, _android_run_icon_svg, EDSCALE, upsample, false);
 		run_icon = ImageTexture::create_from_image(img);
 
-		devices_changed.set();
 #ifndef DISABLE_DEPRECATED
 		android_plugins_changed.set();
 #endif // DISABLE_DEPRECATED
 #ifndef ANDROID_ENABLED
+		devices_changed.set();
 		_create_editor_debug_keystore_if_needed();
 		_update_preset_status();
-		check_for_changes_thread.start(_check_for_changes_poll_thread, this);
-#endif
 		use_scrcpy = EditorSettings::get_singleton()->get_project_metadata("android", "use_scrcpy", false);
+#else // ANDROID_ENABLED
+		android_editor_gradle_runner = memnew(AndroidEditorGradleRunner);
+#endif // ANDROID_ENABLED
 	}
 }
 
 EditorExportPlatformAndroid::~EditorExportPlatformAndroid() {
 #ifndef ANDROID_ENABLED
-	quit_request.set();
-	if (check_for_changes_thread.is_started()) {
-		check_for_changes_thread.wait_to_finish();
+	_stop_check_for_changes_poll_thread();
+#else
+	if (android_editor_gradle_runner) {
+		memdelete(android_editor_gradle_runner);
 	}
 #endif
 }

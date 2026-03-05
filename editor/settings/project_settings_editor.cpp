@@ -32,6 +32,8 @@
 
 #include "core/config/project_settings.h"
 #include "core/input/input_map.h"
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
 #include "editor/editor_undo_redo_manager.h"
@@ -306,7 +308,7 @@ void ProjectSettingsEditor::shortcut_input(const Ref<InputEvent> &p_event) {
 			handled = true;
 		}
 
-		if (ED_IS_SHORTCUT("file_dialog/focus_path", p_event)) {
+		if (ED_IS_SHORTCUT("filesystem_dock/focus_path", p_event)) {
 			_focus_current_path_box();
 			handled = true;
 		}
@@ -411,8 +413,6 @@ void ProjectSettingsEditor::_focus_current_path_box() {
 		current_path_box = property_box;
 	} else if (tab == action_map_editor) {
 		current_path_box = action_map_editor->get_path_box();
-	} else if (tab == autoload_settings) {
-		current_path_box = autoload_settings->get_path_box();
 	} else if (tab == shaders_global_shader_uniforms_editor) {
 		current_path_box = shaders_global_shader_uniforms_editor->get_name_box();
 	} else if (tab == group_settings) {
@@ -612,6 +612,11 @@ void ProjectSettingsEditor::_update_action_map_editor() {
 		// Strip the "input/" from the left.
 		String display_name = property_name.substr(String("input/").size() - 1);
 		Dictionary action = GLOBAL_GET(property_name);
+
+		if (!action.has("events")) {
+			WARN_PRINT_ONCE_ED(vformat("Attempted to load invalid input action from setting at \"%s\". The `input/` prefix should only be used for input actions, and cannot be changed in the settings editor. Consider changing the category.", property_name));
+			continue;
+		}
 
 		ActionMapEditor::ActionInfo action_info;
 		action_info.action = action;
@@ -813,6 +818,7 @@ ProjectSettingsEditor::ProjectSettingsEditor(EditorData *p_data) {
 	tab_container->add_child(localization_editor);
 
 	TabContainer *globals_container = memnew(TabContainer);
+	globals_container->set_theme_type_variation("TabContainerInner");
 	globals_container->set_name(TTRC("Globals"));
 	tab_container->add_child(globals_container);
 
