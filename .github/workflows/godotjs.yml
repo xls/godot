@@ -9,6 +9,17 @@ on:
   # Also handle a release that’s created from the UI
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: ‘Branch or tag to build (e.g. 4.6-dev or 4.6-dev-rel1)’
+        required: true
+        default: ‘4.6-dev’
+      publish_release:
+        description: ‘Publish as a GitHub Release?’
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write    # required to create/update releases and upload assets
@@ -20,13 +31,14 @@ jobs:
 
     env:
       REPO_NAME: ${{ github.event.repository.name }}
-      # For tag builds, this will be the tag (e.g. v1.2.3). For non-tags it’s the branch name.
-      REF_NAME: ${{ github.ref_name }}
+      # For manual runs use the input ref, otherwise use the git ref name.
+      REF_NAME: ${{ github.event.inputs.ref || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
           submodules: recursive
 
       # Set up MSVC/VS build environment (finds latest installed VS on the runner)
@@ -97,7 +109,7 @@ jobs:
 
       # If the run is for a tag (push tags or a published release), attach the zip to the release
       - name: Upload to GitHub Release (tag builds)
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' || github.event.inputs.publish_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.zip.outputs.ZIP_PATH }}
