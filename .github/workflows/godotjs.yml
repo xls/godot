@@ -9,6 +9,17 @@ on:
   # Also handle a release that’s created from the UI
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: ‘Branch or tag to build (e.g. 4.6-dev or 4.6-dev-rel1)’
+        required: true
+        default: ‘4.6-dev’
+      publish_release:
+        description: ‘Publish as a GitHub Release?’
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write    # required to create/update releases and upload assets
@@ -20,13 +31,14 @@ jobs:
 
     env:
       REPO_NAME: ${{ github.event.repository.name }}
-      # For tag builds, this will be the tag (e.g. v1.2.3). For non-tags it’s the branch name.
-      REF_NAME: ${{ github.ref_name }}
+      # For manual runs use the input ref, otherwise use the git ref name.
+      REF_NAME: ${{ github.event.inputs.ref || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
           submodules: recursive
 
       # Set up MSVC/VS build environment (finds latest installed VS on the runner)
@@ -68,31 +80,24 @@ jobs:
         id: name_zip
         shell: pwsh
         run: |
-          $isTag = '${{ startsWith(github.ref, 'refs/tags/') }}' -eq 'true'
-          if ($isTag) {
-            $zip = "${{ env.REPO_NAME }}-${{ env.REF_NAME }}.zip"
-          } else {
-            # non-tag builds still get a stable artifact name
-            $zip = "${{ env.REPO_NAME }}-windows-${{ github.run_number }}.zip"
-          }
+          $branch = '${{ env.REF_NAME }}' -replace '[^a-zA-Z0-9._-]', '-'
+          $zip = "godot.windows.$branch.zip"
           "zip_name=$zip" | Out-File -FilePath $Env:GITHUB_OUTPUT -Append
 
       - name: Create ZIP from bin
+        id: zip
         shell: pwsh
         run: |
           $zip = "${{ steps.name_zip.outputs.zip_name }}"
-          $items = @()
-          $items += Get-ChildItem -Path "bin" -Include *.exe,*.pdb,*.lib -File -Recurse
+          $items = Get-ChildItem -Path "bin" -Include *.exe,*.lib,*.dll,*.pdb -File -Recurse
           if (-not $items -or $items.Count -eq 0) {
-            Write-Error "No build outputs found in .\bin (expected *.exe, *.pdb, *.lib)."
+            Write-Error "No build outputs found in .\bin (expected *.exe, *.lib, *.dll, *.pdb)."
           }
-          # Ensure output directory exists
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $zipPath = Join-Path dist $zip
+          $zipPath = "dist/$zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
           Compress-Archive -Path $items.FullName -DestinationPath $zipPath
           "ZIP_PATH=$zipPath" | Out-File -FilePath $Env:GITHUB_OUTPUT -Append
-        id: zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -104,7 +109,7 @@ jobs:
 
       # If the run is for a tag (push tags or a published release), attach the zip to the release
       - name: Upload to GitHub Release (tag builds)
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' || github.event.inputs.publish_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.zip.outputs.ZIP_PATH }}
