@@ -31,21 +31,30 @@ Script tasks:
 *the script only modifies files in the repository (godot\..) and your environment should be untouched.*
 *script can be run repeatedly*
 ```
-curl -L -o bootstrap.bat https://raw.githubusercontent.com/xls/godot/refs/heads/4.7-dev/bootstrap.bat && cmd /c bootstrap.bat && del bootstrap.bat
+curl -L -o bootstrap.bat https://raw.githubusercontent.com/xls/godot/refs/heads/4.7-dev/bootstrap.bat && cmd /c .\bootstrap.bat && del bootstrap.bat
 ```
+
+### Other Godot versions
+Each branch has its own bootstrap.bat, which clones the matching godot and GodotJS branches.
+Replace `4.7-dev` in the URL above with the version you want:
+
+| Godot | godot branch | GodotJS branch |
+|-------|--------------|----------------|
+| 4.7   | 4.7-dev      | 4.7-dev        |
+| 4.6   | 4.6-dev      | 4.6-dev        |
 
 ### bootstrap.bat script usage post-first-run
 alternatively run scons directly see [Scons Commands](#scons-cli)
 
 #### Build release binary
 ```
-bootstrap
+.\bootstrap
 ```
 *binaries output in the bin folder.*
 
 #### Open up Visual Studio solution using --vstudio argument
 ```
-bootstrap --vstudio
+.\bootstrap --vstudio
 ```
 *Visual Studio solution for Godot will open up if script completes successfully.*
 
@@ -65,7 +74,7 @@ cd godot
 ```
 pushd
 cd modules
-git clone -b 4.6-dev --recursive https://github.com/xls/GodotJS
+git clone -b 4.7-dev --recursive https://github.com/xls/GodotJS
 cd GodotJS
 curl -L -o v8_12.9.202.28_v1.0.zip https://github.com/xls/V8-libraries/releases/download/v8_12.9.202.28_v1.0/v8_12.9.202.28_v1.0.zip
 tar -xf v8_12.9.202.28_v1.0.zip

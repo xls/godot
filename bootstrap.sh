@@ -60,7 +60,7 @@ main() {
     if [[ -d "GodotJS" ]]; then
         echo "[INFO] GodotJS repo already present, skipping clone."
     else
-        git clone -b 4.6-dev --recursive https://github.com/xls/GodotJS || {
+        git clone -b 4.7-dev --recursive https://github.com/xls/GodotJS || {
             echo "[ABORT] git clone GodotJS" >&2
             exit 1
         }
