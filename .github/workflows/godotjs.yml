@@ -2,21 +2,21 @@ name: Build (Windows)
 
 on:
   push:
-    branches: [ "4.6-dev" ]
+    branches: [ "4.7-dev" ]
     tags:     [ "v*", "*" ]
   pull_request:
-    branches: [ "4.6-dev" ]
-  # Also handle a release that’s created from the UI
+    branches: [ "4.7-dev" ]
+  # Also handle a release that's created from the UI
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       ref:
-        description: ‘Branch or tag to build (e.g. 4.6-dev or 4.6-dev-rel1)’
+        description: 'Branch or tag to build (e.g. 4.7-dev or 4.7-dev-rel1)'
         required: true
-        default: ‘4.6-dev’
+        default: '4.7-dev'
       publish_release:
-        description: ‘Publish as a GitHub Release?’
+        description: 'Publish as a GitHub Release?'
         required: true
         type: boolean
         default: false

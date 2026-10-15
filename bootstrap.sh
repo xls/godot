@@ -33,7 +33,7 @@ main() {
         if [[ -d "godot" ]]; then
             echo "[INFO] godot repo already present, skipping clone."
         else
-            git clone -b 4.6-dev --recursive https://github.com/xls/godot || {
+            git clone -b 4.7-dev --recursive https://github.com/xls/godot || {
                 echo "[ABORT] git clone godot" >&2
                 exit 1
             }

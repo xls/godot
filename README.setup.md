@@ -31,7 +31,7 @@ Script tasks:
 *the script only modifies files in the repository (godot\..) and your environment should be untouched.*
 *script can be run repeatedly*
 ```
-curl -L -o bootstrap.bat https://raw.githubusercontent.com/xls/godot/refs/heads/4.6-dev/bootstrap.bat && cmd /c bootstrap.bat && del bootstrap.bat
+curl -L -o bootstrap.bat https://raw.githubusercontent.com/xls/godot/refs/heads/4.7-dev/bootstrap.bat && cmd /c bootstrap.bat && del bootstrap.bat
 ```
 
 ### bootstrap.bat script usage post-first-run
@@ -57,7 +57,7 @@ bootstrap --vstudio
 ## Manual Setup
 
 ```
-git clone -b 4.6-dev --recursive https://github.com/xls/godot 
+git clone -b 4.7-dev --recursive https://github.com/xls/godot 
 cd godot
 ```
 
