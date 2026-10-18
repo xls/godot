@@ -2035,6 +2035,38 @@ const Variant GDScriptInstance::get_rpc_config() const {
 	return script->get_rpc_config();
 }
 
+#ifdef DEBUG_ENABLED
+// [fork] Backport of godotengine/godot#124419 / #123040 (issue #119057) for 4.7: an empty value
+// of the member's declared type (typed containers keep their element types). Drop this and
+// take upstream's reload_members() once the fork is rebased onto a release that has the fix.
+static Variant _reload_empty_value_for_data_type(const GDScriptDataType &p_data_type) {
+	if (p_data_type.kind != GDScriptDataType::BUILTIN) {
+		return Variant();
+	}
+	if (p_data_type.builtin_type == Variant::ARRAY) {
+		Array array;
+		if (p_data_type.has_container_element_type(0)) {
+			const GDScriptDataType &element_type = p_data_type.get_container_element_type(0);
+			array.set_typed(element_type.builtin_type, element_type.native_type, element_type.script_type);
+		}
+		return array;
+	}
+	if (p_data_type.builtin_type == Variant::DICTIONARY) {
+		Dictionary dict;
+		if (p_data_type.has_container_element_types()) {
+			const GDScriptDataType &key_type = p_data_type.get_container_element_type_or_variant(0);
+			const GDScriptDataType &value_type = p_data_type.get_container_element_type_or_variant(1);
+			dict.set_typed(key_type.builtin_type, key_type.native_type, key_type.script_type, value_type.builtin_type, value_type.native_type, value_type.script_type);
+		}
+		return dict;
+	}
+	Callable::CallError ce;
+	Variant variant;
+	Variant::construct(p_data_type.builtin_type, variant, nullptr, 0, ce);
+	return ce.error == Callable::CallError::CALL_OK ? variant : Variant();
+}
+#endif
+
 void GDScriptInstance::reload_members() {
 #ifdef DEBUG_ENABLED
 
@@ -2043,9 +2075,18 @@ void GDScriptInstance::reload_members() {
 
 	//pass the values to the new indices
 	for (KeyValue<StringName, GDScript::MemberInfo> &E : script->member_indices) {
+		// [fork] #119057: a member that is new (or whose value no longer fits its declared type)
+		// used to stay Nil on live instances, and typed code iterating it crashed the editor.
+		bool assigned = false;
 		if (member_indices_cache.has(E.key)) {
 			Variant value = members[member_indices_cache[E.key]];
-			new_members.write[E.value.index] = value;
+			if (!E.value.data_type.has_type() || E.value.data_type.is_type(value, false)) {
+				new_members.write[E.value.index] = value;
+				assigned = true;
+			}
+		}
+		if (!assigned) {
+			new_members.write[E.value.index] = _reload_empty_value_for_data_type(E.value.data_type);
 		}
 	}
 
