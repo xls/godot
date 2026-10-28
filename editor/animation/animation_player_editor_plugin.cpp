@@ -1492,7 +1492,7 @@ void AnimationPlayerEditor::_animation_finished(const String &p_name) {
 }
 
 void AnimationPlayerEditor::_current_animation_changed(const StringName &p_name) {
-	if (is_visible_in_tree()) {
+	if (is_visible_in_tree() && player) {
 		if (finishing) {
 			finishing = false; // Maybe redundant since it will be false in the AnimationPlayerEditor::_process(), but for safety.
 			return;
