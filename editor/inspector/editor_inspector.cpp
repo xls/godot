@@ -2115,8 +2115,9 @@ void EditorInspectorSection::_test_unfold() {
 
 Ref<Texture2D> EditorInspectorSection::_get_arrow() {
 	Ref<Texture2D> arrow;
+	Object *obj = _get_object();
 	if (foldable) {
-		if (object->editor_is_section_unfolded(section)) {
+		if (obj && obj->editor_is_section_unfolded(section)) {
 			arrow = theme_cache.arrow;
 		} else {
 			if (is_layout_rtl()) {
@@ -2400,7 +2401,8 @@ void EditorInspectorSection::_notification(int p_what) {
 				if (rtl) {
 					text_offset.x = margin_end;
 				}
-				if (object->has_method("_get_property_warning") && !String(object->call("_get_property_warning", related_enable_property)).is_empty()) {
+				Object *obj = _get_object();
+				if (obj && obj->has_method("_get_property_warning") && !String(obj->call("_get_property_warning", related_enable_property)).is_empty()) {
 					font_color = theme_cache.warning_color;
 				}
 				const Color string_color = header_hover ? theme_cache.font_hover_mono_color : font_color;
@@ -2504,8 +2506,9 @@ Control *EditorInspectorSection::make_custom_tooltip(const String &p_text) const
 	String symbol;
 	String prologue;
 
-	if (object->has_method("_get_property_warning")) {
-		const String custom_warning = object->call("_get_property_warning", related_enable_property);
+	Object *obj = _get_object();
+	if (obj && obj->has_method("_get_property_warning")) {
+		const String custom_warning = obj->call("_get_property_warning", related_enable_property);
 		if (!custom_warning.is_empty()) {
 			prologue = "[b][color=" + theme_cache.warning_color.to_html(false) + "]" + custom_warning + "[/color][/b]";
 		}
@@ -2535,6 +2538,7 @@ void EditorInspectorSection::setup(const String &p_section, const String &p_labe
 	section = p_section;
 	label = p_label;
 	object = p_object;
+	object_id = p_object ? p_object->get_instance_id() : ObjectID();
 	bg_color = p_bg_color;
 	foldable = p_foldable;
 	indent_depth = p_indent_depth;
@@ -2589,7 +2593,11 @@ void EditorInspectorSection::gui_input(const Ref<InputEvent> &p_event) {
 		if (foldable && can_click_unfold && k->is_action("ui_accept", true)) {
 			accept_event();
 
-			bool should_unfold = !object->editor_is_section_unfolded(section);
+			Object *obj = _get_object();
+			if (!obj) {
+				return;
+			}
+			bool should_unfold = !obj->editor_is_section_unfolded(section);
 			if (should_unfold) {
 				unfold();
 			} else {
@@ -2601,8 +2609,12 @@ void EditorInspectorSection::gui_input(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> mb = p_event;
 	if (mb.is_valid() && mb->is_pressed() && mb->get_button_index() == MouseButton::LEFT) {
 		Vector2 pos = mb->get_position();
+		Object *obj = _get_object();
+		if (!obj) {
+			return;
+		}
 
-		if (object->editor_is_section_unfolded(section)) {
+		if (obj->editor_is_section_unfolded(section)) {
 			int header_height = _get_header_height();
 
 			if (pos.y >= header_height) {
@@ -2614,7 +2626,7 @@ void EditorInspectorSection::gui_input(const Ref<InputEvent> &p_event) {
 
 		bool is_valid_revert = false;
 		if (can_revert && revert_rect.has_point(pos)) {
-			Variant revert_value = EditorPropertyRevert::get_property_revert_value(object, related_enable_property, &is_valid_revert);
+			Variant revert_value = EditorPropertyRevert::get_property_revert_value(obj, related_enable_property, &is_valid_revert);
 			ERR_FAIL_COND(!is_valid_revert);
 		}
 		if (is_valid_revert || (checkable && check_rect.has_point(pos))) {
@@ -2628,7 +2640,7 @@ void EditorInspectorSection::gui_input(const Ref<InputEvent> &p_event) {
 		} else if (keying && keying_rect.has_point(pos)) {
 			emit_signal(SNAME("property_keyed"), related_enable_property, false);
 		} else if (foldable) {
-			bool should_unfold = can_click_unfold && !object->editor_is_section_unfolded(section);
+			bool should_unfold = can_click_unfold && !obj->editor_is_section_unfolded(section);
 			if (should_unfold) {
 				unfold();
 			} else {
@@ -2669,8 +2681,9 @@ void EditorInspectorSection::unfold() {
 
 	_test_unfold();
 
-	if (foldable) {
-		object->editor_set_section_unfold(section, true);
+	Object *obj = _get_object();
+	if (foldable && obj) {
+		obj->editor_set_section_unfold(section, true);
 	}
 
 	vbox->show();
@@ -2682,7 +2695,9 @@ void EditorInspectorSection::fold() {
 		return;
 	}
 
-	object->editor_set_section_unfold(section, false);
+	if (Object *obj = _get_object()) {
+		obj->editor_set_section_unfold(section, false);
+	}
 	vbox->hide();
 	queue_redraw();
 }

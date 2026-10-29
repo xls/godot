@@ -460,6 +460,10 @@ class EditorInspectorSection : public Container {
 	String section;
 	Color bg_color;
 	bool vbox_added = false; // Optimization.
+	// [fork] The edited object can be freed while its sections are still drawn or clicked (a tool
+	// script or plugin replacing what the Inspector shows); look it up by ID before every use.
+	ObjectID object_id;
+	Object *_get_object() const { return ObjectDB::get_instance(object_id); }
 	bool foldable = false;
 	bool checkable = false;
 	bool checked = false;
