@@ -457,6 +457,16 @@ class GDScriptLanguage : public ScriptLanguage {
 	friend class GDScriptFunction;
 
 	SelfList<GDScriptFunction>::List function_list;
+
+	// [fork] Functions of a recompiled script that were still running, freed by frame() once no
+	// GDScript runs on the main thread. The Ref keeps their script alive until then.
+	struct RunningFunctionFree {
+		GDScriptFunction *function = nullptr;
+		Ref<GDScript> script;
+	};
+	LocalVector<RunningFunctionFree> running_function_frees;
+	void _free_running_functions();
+
 #ifdef DEBUG_ENABLED
 	bool profiling;
 	bool profile_native_calls;
@@ -632,6 +642,9 @@ public:
 	virtual void reload_tool_script(const Ref<Script> &p_script, bool p_soft_reload) override;
 
 	virtual void frame() override;
+
+	// [fork] Frees a function of a script being recompiled, or keeps it until it has returned.
+	void free_replaced_function(GDScriptFunction *p_function);
 
 	virtual void get_public_functions(List<MethodInfo> *p_functions) const override;
 	virtual void get_public_constants(List<Pair<String, Variant>> *p_constants) const override;

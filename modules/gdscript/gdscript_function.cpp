@@ -234,7 +234,12 @@ GDScriptFunction::GDScriptFunction() {
 }
 
 GDScriptFunction::~GDScriptFunction() {
-	get_script()->member_functions.erase(name);
+	// [fork] Only when the script still lists this function: one freed after a recompile (see
+	// GDScriptLanguage::free_replaced_function) shares its name with the new version.
+	GDScriptFunction **listed = get_script()->member_functions.getptr(name);
+	if (listed && *listed == this) {
+		get_script()->member_functions.erase(name);
+	}
 
 	for (int i = 0; i < lambdas.size(); i++) {
 		memdelete(lambdas[i]);

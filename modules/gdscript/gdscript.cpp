@@ -2272,6 +2272,8 @@ void GDScriptLanguage::finish() {
 	}
 	finishing = true;
 
+	_free_running_functions();
+
 	// Clear the cache before parsing the script_list
 	GDScriptCache::clear();
 
@@ -2649,7 +2651,46 @@ void GDScriptLanguage::reload_tool_script(const Ref<Script> &p_script, bool p_so
 	reload_scripts(scripts, p_soft_reload);
 }
 
+// [fork] Recompiling a script (a reload, or GDScriptCache compiling a dependency) deleted its
+// functions even when one of them was still running: a script that saves a resource or scene runs
+// a nested Main::iteration() whenever a progress dialog steps, and in that iteration the editor
+// reloads scripts changed on disk. The running function then returned into freed memory (its
+// stack cleanup used a garbage _stack_size and the editor crashed in Variant's destructor). Such a
+// function is kept, still compiled, until no GDScript runs on the main thread any more.
+void GDScriptLanguage::free_replaced_function(GDScriptFunction *p_function) {
+	if (!p_function) {
+		return;
+	}
+	for (const CallLevel *cl = _call_stack; cl; cl = cl->prev) {
+		if (cl->function == p_function) {
+			MutexLock lock(mutex);
+			RunningFunctionFree deferred;
+			deferred.function = p_function;
+			deferred.script = Ref<GDScript>(p_function->get_script());
+			running_function_frees.push_back(deferred);
+			return;
+		}
+	}
+	memdelete(p_function);
+}
+
+void GDScriptLanguage::_free_running_functions() {
+	LocalVector<RunningFunctionFree> frees;
+	{
+		MutexLock lock(mutex);
+		frees = running_function_frees;
+		running_function_frees.clear();
+	}
+	for (RunningFunctionFree &deferred : frees) {
+		memdelete(deferred.function);
+	}
+}
+
 void GDScriptLanguage::frame() {
+	if (!running_function_frees.is_empty() && _call_stack_size == 0) {
+		_free_running_functions();
+	}
+
 #ifdef DEBUG_ENABLED
 	if (profiling) {
 		MutexLock lock(mutex);

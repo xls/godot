@@ -2715,22 +2715,17 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 		member_functions.insert(E.key, E.value);
 	}
 	p_script->member_functions.clear();
+	// [fork] A function that is still running is freed after it returns (see free_replaced_function).
 	for (const KeyValue<StringName, GDScriptFunction *> &E : member_functions) {
-		memdelete(E.value);
+		GDScriptLanguage::get_singleton()->free_replaced_function(E.value);
 	}
 	member_functions.clear();
 
 	p_script->static_variables.clear();
 
-	if (p_script->implicit_initializer) {
-		memdelete(p_script->implicit_initializer);
-	}
-	if (p_script->implicit_ready) {
-		memdelete(p_script->implicit_ready);
-	}
-	if (p_script->static_initializer) {
-		memdelete(p_script->static_initializer);
-	}
+	GDScriptLanguage::get_singleton()->free_replaced_function(p_script->implicit_initializer);
+	GDScriptLanguage::get_singleton()->free_replaced_function(p_script->implicit_ready);
+	GDScriptLanguage::get_singleton()->free_replaced_function(p_script->static_initializer);
 
 	p_script->member_functions.clear();
 	p_script->member_indices.clear();
