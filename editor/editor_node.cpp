@@ -2440,7 +2440,12 @@ void EditorNode::_save_scene_silently() {
 	}
 }
 
-static void _reset_animation_mixers(Node *p_node, List<Pair<AnimationMixer *, Ref<AnimatedValuesBackup>>> *r_anim_backups) {
+// [fork] The mixers are kept as ObjectIDs: between the reset and the restore, _save_scene() saves
+// the file, emits scene_saved, saves external resources and steps progress dialogs (each step runs
+// a nested Main::iteration()). Plugins, scripts and instance reloads can free a mixer meanwhile
+// (e.g. an instanced sub-scene that was just regenerated), and restore() on the freed pointer crashed
+// in Memory::free_static (AHashMap::reset of its track cache).
+static void _reset_animation_mixers(Node *p_node, List<Pair<ObjectID, Ref<AnimatedValuesBackup>>> *r_anim_backups) {
 	for (int i = 0; i < p_node->get_child_count(); i++) {
 		AnimationMixer *mixer = Object::cast_to<AnimationMixer>(p_node->get_child(i));
 		if (mixer && mixer->is_active() && mixer->is_reset_on_save_enabled() && mixer->can_apply_reset()) {
@@ -2453,8 +2458,8 @@ static void _reset_animation_mixers(Node *p_node, List<Pair<AnimationMixer *, Re
 			}
 			Ref<AnimatedValuesBackup> backup = mixer->apply_reset();
 			if (backup.is_valid()) {
-				Pair<AnimationMixer *, Ref<AnimatedValuesBackup>> pair;
-				pair.first = mixer;
+				Pair<ObjectID, Ref<AnimatedValuesBackup>> pair;
+				pair.first = mixer->get_instance_id();
 				pair.second = backup;
 				r_anim_backups->push_back(pair);
 			}
@@ -2482,7 +2487,7 @@ void EditorNode::_save_scene(String p_file, int idx) {
 
 	editor_data.apply_changes_in_editors();
 	save_default_environment();
-	List<Pair<AnimationMixer *, Ref<AnimatedValuesBackup>>> anim_backups;
+	List<Pair<ObjectID, Ref<AnimatedValuesBackup>>> anim_backups;
 	_reset_animation_mixers(scene, &anim_backups);
 	_save_editor_states(p_file, idx);
 
@@ -2526,8 +2531,11 @@ void EditorNode::_save_scene(String p_file, int idx) {
 	editor_data.save_editor_external_data();
 	saving_scene = "";
 
-	for (Pair<AnimationMixer *, Ref<AnimatedValuesBackup>> &E : anim_backups) {
-		E.first->restore(E.second);
+	for (Pair<ObjectID, Ref<AnimatedValuesBackup>> &E : anim_backups) {
+		AnimationMixer *mixer = ObjectDB::get_instance<AnimationMixer>(E.first);
+		if (mixer) {
+			mixer->restore(E.second);
+		}
 	}
 
 	if (err == OK) {
