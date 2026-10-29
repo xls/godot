@@ -3026,6 +3026,13 @@ void EditorHelp::remove_class(const String &p_class) {
 	}
 }
 
+// [fork] The doc threads queue load_script_doc_cache(), _gen_extensions_docs() and
+// generate_doc() with call_deferred(). When the editor quits while a documentation
+// (re)generation is running (--editor --quit, or the first start after switching to a build
+// with other classes, which invalidates the shared editor_doc_cache), Main::cleanup() flushes
+// those calls after EditorNode, EditorFileSystem and the docs are gone. They must do nothing then.
+static bool _docs_shut_down = false;
+
 void EditorHelp::_load_doc_thread(void *p_udata) {
 	bool use_script_cache = (bool)p_udata;
 	Ref<Resource> cache_res = ResourceLoader::load(get_cache_full_path());
@@ -3081,6 +3088,9 @@ void EditorHelp::_gen_doc_thread(void *p_udata) {
 }
 
 void EditorHelp::_gen_extensions_docs() {
+	if (_docs_shut_down || !doc) {
+		return;
+	}
 	doc->generate((DocTools::GENERATE_FLAG_SKIP_BASIC_TYPES | DocTools::GENERATE_FLAG_EXTENSION_CLASSES_ONLY));
 
 	// Append extra doc data, as it gets overridden by the generation step.
@@ -3093,6 +3103,9 @@ static void _load_script_doc_cache(bool p_changes) {
 }
 
 void EditorHelp::load_script_doc_cache() {
+	if (_docs_shut_down || !EditorFileSystem::get_singleton()) {
+		return;
+	}
 	if (!ProjectSettings::get_singleton()->is_project_loaded()) {
 		print_verbose("Skipping loading script doc cache since no project is open.");
 		return;
@@ -3167,6 +3180,9 @@ static void _regenerate_script_doc_cache(bool p_changes) {
 }
 
 void EditorHelp::regenerate_script_doc_cache() {
+	if (_docs_shut_down || !EditorFileSystem::get_singleton()) {
+		return;
+	}
 	if (EditorFileSystem::get_singleton()->is_scanning()) {
 		// Wait until EditorFileSystem scanning is complete to use updated filesystem structure.
 		EditorFileSystem::get_singleton()->connect(SNAME("sources_changed"), callable_mp_static(_regenerate_script_doc_cache), CONNECT_ONE_SHOT);
@@ -3252,6 +3268,9 @@ void EditorHelp::save_script_doc_cache() {
 }
 
 void EditorHelp::generate_doc(bool p_use_cache, bool p_use_script_cache) {
+	if (_docs_shut_down) {
+		return;
+	}
 	doc_generation_count++;
 	OS::get_singleton()->benchmark_begin_measure("EditorHelp", vformat("Generate Documentation (Run %d)", doc_generation_count));
 
@@ -3363,6 +3382,7 @@ void EditorHelp::update_doc() {
 }
 
 void EditorHelp::cleanup_doc() {
+	_docs_shut_down = true;
 	_wait_for_thread();
 	memdelete(doc);
 	doc = nullptr;
