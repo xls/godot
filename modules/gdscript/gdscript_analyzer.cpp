@@ -4038,7 +4038,7 @@ void GDScriptAnalyzer::reduce_identifier_from_base_set_class(GDScriptParser::Ide
 	p_identifier->set_datatype(p_identifier_datatype);
 	Error err = OK;
 	Ref<GDScript> scr = get_depended_shallow_script(p_identifier_datatype.script_path, err);
-	if (err) {
+	if (err || scr.is_null()) { // [fork] A null script without an error crashed in find_class().
 		push_error(vformat(R"(Error while getting cache for script "%s".)", p_identifier_datatype.script_path), p_identifier);
 		return;
 	}

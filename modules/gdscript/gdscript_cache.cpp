@@ -423,9 +423,20 @@ Ref<GDScript> GDScriptCache::get_cached_script(const String &p_path) {
 Error GDScriptCache::finish_compiling(const String &p_owner) {
 	MutexLock lock(singleton->mutex);
 
+	// [fork] A script compiled without a path (GDScript.new() + reload(), as editor tools and
+	// snippets do) is not in the cache, and get_cached_script("") returned null: storing that
+	// left full_gdscript_cache[""] = null, so the next path-less script naming its own class got a
+	// null script without an error from get_shallow_script("") and crashed in
+	// GDScript::find_class (from GDScriptAnalyzer::reduce_identifier_from_base_set_class).
+	if (p_owner.is_empty()) {
+		return OK;
+	}
+
 	// Mark this as compiled.
 	Ref<GDScript> script = get_cached_script(p_owner);
-	singleton->full_gdscript_cache[p_owner] = script;
+	if (script.is_valid()) {
+		singleton->full_gdscript_cache[p_owner] = script;
+	}
 	singleton->shallow_gdscript_cache.erase(p_owner);
 
 	HashSet<String> depends(singleton->dependencies[p_owner]);
