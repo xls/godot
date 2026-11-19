@@ -2445,26 +2445,41 @@ void EditorNode::_save_scene_silently() {
 // a nested Main::iteration()). Plugins, scripts and instance reloads can free a mixer meanwhile
 // (e.g. an instanced sub-scene that was just regenerated), and restore() on the freed pointer crashed
 // in Memory::free_static (AHashMap::reset of its track cache).
-static void _reset_animation_mixers(Node *p_node, List<Pair<ObjectID, Ref<AnimatedValuesBackup>>> *r_anim_backups) {
+// [fork] The mixers to reset are collected before any reset: AnimationMixer::reset() adds a helper
+// AnimationPlayer under the mixer's root node (freed at the end of the frame), so resetting during
+// the walk grew the child list being walked, and every add_child() made get_child() sort that list
+// again. With many children under the scene root the save before Play never finished.
+static void _collect_reset_mixers(Node *p_node, LocalVector<ObjectID> &r_mixers) {
 	for (int i = 0; i < p_node->get_child_count(); i++) {
-		AnimationMixer *mixer = Object::cast_to<AnimationMixer>(p_node->get_child(i));
+		Node *child = p_node->get_child(i);
+		AnimationMixer *mixer = Object::cast_to<AnimationMixer>(child);
 		if (mixer && mixer->is_active() && mixer->is_reset_on_save_enabled() && mixer->can_apply_reset()) {
-			AnimationTree *tree = Object::cast_to<AnimationTree>(p_node->get_child(i));
-			if (tree) {
-				AnimationPlayer *player = Object::cast_to<AnimationPlayer>(tree->get_node_or_null(tree->get_animation_player()));
-				if (player && player->is_active() && player->is_reset_on_save_enabled() && player->can_apply_reset()) {
-					continue; // Avoid to process reset/restore many times.
-				}
+			AnimationTree *tree = Object::cast_to<AnimationTree>(child);
+			AnimationPlayer *player = tree ? Object::cast_to<AnimationPlayer>(tree->get_node_or_null(tree->get_animation_player())) : nullptr;
+			if (player && player->is_active() && player->is_reset_on_save_enabled() && player->can_apply_reset()) {
+				continue; // Avoid to process reset/restore many times.
 			}
-			Ref<AnimatedValuesBackup> backup = mixer->apply_reset();
-			if (backup.is_valid()) {
-				Pair<ObjectID, Ref<AnimatedValuesBackup>> pair;
-				pair.first = mixer->get_instance_id();
-				pair.second = backup;
-				r_anim_backups->push_back(pair);
-			}
+			r_mixers.push_back(mixer->get_instance_id());
 		}
-		_reset_animation_mixers(p_node->get_child(i), r_anim_backups);
+		_collect_reset_mixers(child, r_mixers);
+	}
+}
+
+static void _reset_animation_mixers(Node *p_node, List<Pair<ObjectID, Ref<AnimatedValuesBackup>>> *r_anim_backups) {
+	LocalVector<ObjectID> mixers;
+	_collect_reset_mixers(p_node, mixers);
+	for (const ObjectID &id : mixers) {
+		AnimationMixer *mixer = ObjectDB::get_instance<AnimationMixer>(id);
+		if (!mixer) {
+			continue;
+		}
+		Ref<AnimatedValuesBackup> backup = mixer->apply_reset();
+		if (backup.is_valid()) {
+			Pair<ObjectID, Ref<AnimatedValuesBackup>> pair;
+			pair.first = id;
+			pair.second = backup;
+			r_anim_backups->push_back(pair);
+		}
 	}
 }
 
